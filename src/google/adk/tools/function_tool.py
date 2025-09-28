@@ -105,8 +105,21 @@ class FunctionTool(BaseTool):
     if 'tool_context' in valid_params:
       args_to_call['tool_context'] = tool_context
 
-    # Filter args_to_call to only include valid parameters for the function
-    args_to_call = {k: v for k, v in args_to_call.items() if k in valid_params}
+    # Check if function accepts **kwargs
+    has_kwargs = any(
+        param.kind == inspect.Parameter.VAR_KEYWORD 
+        for param in signature.parameters.values()
+    )
+
+    if has_kwargs:
+      # For functions with **kwargs, pass all arguments except 'self' and 'tool_context'
+      args_to_call = {
+          k: v for k, v in args_to_call.items() 
+          if k not in ('self', 'tool_context')
+      }
+    else:
+      # For functions without **kwargs, use the original filtering
+      args_to_call = {k: v for k, v in args_to_call.items() if k in valid_params}
 
     # Before invoking the function, we check for if the list of args passed in
     # has all the mandatory arguments or not.

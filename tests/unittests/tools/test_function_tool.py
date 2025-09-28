@@ -394,3 +394,98 @@ async def test_run_async_with_require_confirmation():
       tool_context=tool_context_mock,
   )
   assert result == {"received_arg": "hello"}
+
+
+@pytest.mark.asyncio
+async def test_run_async_with_kwargs_crewai_style():
+  """Test that run_async works with CrewAI-style functions that use **kwargs."""
+  
+  def crewai_style_tool(*args, **kwargs):
+    """CrewAI-style tool that accepts any keyword arguments."""
+    return {
+        "received_args": args,
+        "received_kwargs": kwargs,
+        "search_query": kwargs.get("search_query"),
+        "other_param": kwargs.get("other_param")
+    }
+  
+  tool = FunctionTool(crewai_style_tool)
+  mock_invocation_context = MagicMock(spec=InvocationContext)
+  mock_invocation_context.session = MagicMock(spec=Session)
+  mock_invocation_context.session.state = MagicMock()
+  tool_context_mock = ToolContext(invocation_context=mock_invocation_context)
+  
+  # Test with CrewAI-style parameters that should be passed through
+  result = await tool.run_async(
+      args={
+          "search_query": "test_query",
+          "other_param": "test_value"
+      },
+      tool_context=tool_context_mock,
+  )
+  
+  assert result["search_query"] == "test_query"
+  assert result["other_param"] == "test_value"
+  assert result["received_kwargs"]["search_query"] == "test_query"
+  assert result["received_kwargs"]["other_param"] == "test_value"
+
+
+@pytest.mark.asyncio
+async def test_run_async_with_kwargs_crewai_style_async():
+  """Test that run_async works with async CrewAI-style functions that use **kwargs."""
+  
+  async def async_crewai_style_tool(*args, **kwargs):
+    """Async CrewAI-style tool that accepts any keyword arguments."""
+    return {
+        "received_args": args,
+        "received_kwargs": kwargs,
+        "search_query": kwargs.get("search_query"),
+        "other_param": kwargs.get("other_param")
+    }
+  
+  tool = FunctionTool(async_crewai_style_tool)
+  mock_invocation_context = MagicMock(spec=InvocationContext)
+  mock_invocation_context.session = MagicMock(spec=Session)
+  mock_invocation_context.session.state = MagicMock()
+  tool_context_mock = ToolContext(invocation_context=mock_invocation_context)
+  
+  # Test with CrewAI-style parameters that should be passed through
+  result = await tool.run_async(
+      args={
+          "search_query": "async test query",
+          "other_param": "async test value"
+      },
+      tool_context=tool_context_mock,
+  )
+  
+  assert result["search_query"] == "async test query"
+  assert result["other_param"] == "async test value"
+  assert result["received_kwargs"]["search_query"] == "async test query"
+  assert result["received_kwargs"]["other_param"] == "async test value"
+
+
+@pytest.mark.asyncio
+async def test_run_async_with_kwargs_backward_compatibility():
+  """Test that the **kwargs fix maintains backward compatibility with explicit parameters."""
+  
+  def explicit_params_func(arg1: str, arg2: int):
+    """Function with explicit parameters (no **kwargs)."""
+    return {"arg1": arg1, "arg2": arg2}
+  
+  tool = FunctionTool(explicit_params_func)
+  mock_invocation_context = MagicMock(spec=InvocationContext)
+  mock_invocation_context.session = MagicMock(spec=Session)
+  mock_invocation_context.session.state = MagicMock()
+  tool_context_mock = ToolContext(invocation_context=mock_invocation_context)
+  
+  # Test that unexpected parameters are still filtered out for non-kwargs functions
+  result = await tool.run_async(
+      args={
+          "arg1": "test",
+          "arg2": 42,
+          "unexpected_param": "should_be_filtered"
+      },
+      tool_context=tool_context_mock,
+  )
+  
+  assert result == {"arg1": "test", "arg2": 42}
