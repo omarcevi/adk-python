@@ -489,3 +489,75 @@ async def test_run_async_with_kwargs_backward_compatibility():
   )
   
   assert result == {"arg1": "test", "arg2": 42}
+
+
+@pytest.mark.asyncio
+async def test_run_async_with_kwargs_and_tool_context():
+  """Test that run_async works with functions that have both tool_context and **kwargs."""
+  
+  def func_with_context_and_kwargs(arg1: str, tool_context: ToolContext, **kwargs):
+    """Function with explicit tool_context parameter and **kwargs."""
+    return {
+        "arg1": arg1,
+        "tool_context_present": bool(tool_context),
+        "search_query": kwargs.get("search_query"),
+        "received_kwargs": kwargs
+    }
+  
+  tool = FunctionTool(func_with_context_and_kwargs)
+  mock_invocation_context = MagicMock(spec=InvocationContext)
+  mock_invocation_context.session = MagicMock(spec=Session)
+  mock_invocation_context.session.state = MagicMock()
+  tool_context_mock = ToolContext(invocation_context=mock_invocation_context)
+  
+  # Test that both tool_context and **kwargs parameters work together
+  result = await tool.run_async(
+      args={
+          "arg1": "test_value",
+          "search_query": "omar elcircevi speaker",
+          "other_param": "test_value"
+      },
+      tool_context=tool_context_mock,
+  )
+  
+  assert result["arg1"] == "test_value"
+  assert result["tool_context_present"] == True
+  assert result["search_query"] == "omar elcircevi speaker"
+  assert result["received_kwargs"]["search_query"] == "omar elcircevi speaker"
+  assert result["received_kwargs"]["other_param"] == "test_value"
+
+
+@pytest.mark.asyncio
+async def test_run_async_with_kwargs_and_tool_context_async():
+  """Test that run_async works with async functions that have both tool_context and **kwargs."""
+  
+  async def async_func_with_context_and_kwargs(arg1: str, tool_context: ToolContext, **kwargs):
+    """Async function with explicit tool_context parameter and **kwargs."""
+    return {
+        "arg1": arg1,
+        "tool_context_present": bool(tool_context),
+        "search_query": kwargs.get("search_query"),
+        "received_kwargs": kwargs
+    }
+  
+  tool = FunctionTool(async_func_with_context_and_kwargs)
+  mock_invocation_context = MagicMock(spec=InvocationContext)
+  mock_invocation_context.session = MagicMock(spec=Session)
+  mock_invocation_context.session.state = MagicMock()
+  tool_context_mock = ToolContext(invocation_context=mock_invocation_context)
+  
+  # Test that both tool_context and **kwargs parameters work together
+  result = await tool.run_async(
+      args={
+          "arg1": "async_test_value",
+          "search_query": "async test query",
+          "other_param": "async test value"
+      },
+      tool_context=tool_context_mock,
+  )
+  
+  assert result["arg1"] == "async_test_value"
+  assert result["tool_context_present"] == True
+  assert result["search_query"] == "async test query"
+  assert result["received_kwargs"]["search_query"] == "async test query"
+  assert result["received_kwargs"]["other_param"] == "async test value"

@@ -112,11 +112,11 @@ class FunctionTool(BaseTool):
     )
 
     if has_kwargs:
-      # For functions with **kwargs, pass all arguments except 'self' and 'tool_context'
-      args_to_call = {
-          k: v for k, v in args_to_call.items() 
-          if k not in ('self', 'tool_context')
-      }
+      # For functions with **kwargs, start with the original LLM args and filter reserved names.
+      args_to_call = {k: v for k, v in args.items() if k not in ('self', 'tool_context')}
+      # Then, add back the injected `tool_context` if it's an explicit parameter.
+      if 'tool_context' in valid_params:
+        args_to_call['tool_context'] = tool_context
     else:
       # For functions without **kwargs, use the original filtering
       args_to_call = {k: v for k, v in args_to_call.items() if k in valid_params}
