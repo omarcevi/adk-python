@@ -22,6 +22,15 @@ from google.adk.tools.tool_context import ToolContext
 import pytest
 
 
+@pytest.fixture
+def mock_tool_context() -> ToolContext:
+  """Fixture that provides a mock ToolContext for testing."""
+  mock_invocation_context = MagicMock(spec=InvocationContext)
+  mock_invocation_context.session = MagicMock(spec=Session)
+  mock_invocation_context.session.state = MagicMock()
+  return ToolContext(invocation_context=mock_invocation_context)
+
+
 def function_for_testing_with_no_args():
   """Function for testing with no args."""
   pass
@@ -397,7 +406,7 @@ async def test_run_async_with_require_confirmation():
 
 
 @pytest.mark.asyncio
-async def test_run_async_with_kwargs_crewai_style():
+async def test_run_async_with_kwargs_crewai_style(mock_tool_context):
   """Test that run_async works with CrewAI-style functions that use **kwargs."""
   
   def crewai_style_tool(*args, **kwargs):
@@ -410,10 +419,6 @@ async def test_run_async_with_kwargs_crewai_style():
     }
   
   tool = FunctionTool(crewai_style_tool)
-  mock_invocation_context = MagicMock(spec=InvocationContext)
-  mock_invocation_context.session = MagicMock(spec=Session)
-  mock_invocation_context.session.state = MagicMock()
-  tool_context_mock = ToolContext(invocation_context=mock_invocation_context)
   
   # Test with CrewAI-style parameters that should be passed through
   result = await tool.run_async(
@@ -421,7 +426,7 @@ async def test_run_async_with_kwargs_crewai_style():
           "search_query": "test_query",
           "other_param": "test_value"
       },
-      tool_context=tool_context_mock,
+      tool_context=mock_tool_context,
   )
   
   assert result["search_query"] == "test_query"
@@ -431,7 +436,7 @@ async def test_run_async_with_kwargs_crewai_style():
 
 
 @pytest.mark.asyncio
-async def test_run_async_with_kwargs_crewai_style_async():
+async def test_run_async_with_kwargs_crewai_style_async(mock_tool_context):
   """Test that run_async works with async CrewAI-style functions that use **kwargs."""
   
   async def async_crewai_style_tool(*args, **kwargs):
@@ -444,10 +449,6 @@ async def test_run_async_with_kwargs_crewai_style_async():
     }
   
   tool = FunctionTool(async_crewai_style_tool)
-  mock_invocation_context = MagicMock(spec=InvocationContext)
-  mock_invocation_context.session = MagicMock(spec=Session)
-  mock_invocation_context.session.state = MagicMock()
-  tool_context_mock = ToolContext(invocation_context=mock_invocation_context)
   
   # Test with CrewAI-style parameters that should be passed through
   result = await tool.run_async(
@@ -455,7 +456,7 @@ async def test_run_async_with_kwargs_crewai_style_async():
           "search_query": "async test query",
           "other_param": "async test value"
       },
-      tool_context=tool_context_mock,
+      tool_context=mock_tool_context,
   )
   
   assert result["search_query"] == "async test query"
@@ -465,7 +466,7 @@ async def test_run_async_with_kwargs_crewai_style_async():
 
 
 @pytest.mark.asyncio
-async def test_run_async_with_kwargs_backward_compatibility():
+async def test_run_async_with_kwargs_backward_compatibility(mock_tool_context):
   """Test that the **kwargs fix maintains backward compatibility with explicit parameters."""
   
   def explicit_params_func(arg1: str, arg2: int):
@@ -473,10 +474,6 @@ async def test_run_async_with_kwargs_backward_compatibility():
     return {"arg1": arg1, "arg2": arg2}
   
   tool = FunctionTool(explicit_params_func)
-  mock_invocation_context = MagicMock(spec=InvocationContext)
-  mock_invocation_context.session = MagicMock(spec=Session)
-  mock_invocation_context.session.state = MagicMock()
-  tool_context_mock = ToolContext(invocation_context=mock_invocation_context)
   
   # Test that unexpected parameters are still filtered out for non-kwargs functions
   result = await tool.run_async(
@@ -485,14 +482,14 @@ async def test_run_async_with_kwargs_backward_compatibility():
           "arg2": 42,
           "unexpected_param": "should_be_filtered"
       },
-      tool_context=tool_context_mock,
+      tool_context=mock_tool_context,
   )
   
   assert result == {"arg1": "test", "arg2": 42}
 
 
 @pytest.mark.asyncio
-async def test_run_async_with_kwargs_and_tool_context():
+async def test_run_async_with_kwargs_and_tool_context(mock_tool_context):
   """Test that run_async works with functions that have both tool_context and **kwargs."""
   
   def func_with_context_and_kwargs(arg1: str, tool_context: ToolContext, **kwargs):
@@ -505,10 +502,6 @@ async def test_run_async_with_kwargs_and_tool_context():
     }
   
   tool = FunctionTool(func_with_context_and_kwargs)
-  mock_invocation_context = MagicMock(spec=InvocationContext)
-  mock_invocation_context.session = MagicMock(spec=Session)
-  mock_invocation_context.session.state = MagicMock()
-  tool_context_mock = ToolContext(invocation_context=mock_invocation_context)
   
   # Test that both tool_context and **kwargs parameters work together
   result = await tool.run_async(
@@ -517,7 +510,7 @@ async def test_run_async_with_kwargs_and_tool_context():
           "search_query": "omar elcircevi speaker",
           "other_param": "test_value"
       },
-      tool_context=tool_context_mock,
+      tool_context=mock_tool_context,
   )
   
   assert result["arg1"] == "test_value"
@@ -528,7 +521,7 @@ async def test_run_async_with_kwargs_and_tool_context():
 
 
 @pytest.mark.asyncio
-async def test_run_async_with_kwargs_and_tool_context_async():
+async def test_run_async_with_kwargs_and_tool_context_async(mock_tool_context):
   """Test that run_async works with async functions that have both tool_context and **kwargs."""
   
   async def async_func_with_context_and_kwargs(arg1: str, tool_context: ToolContext, **kwargs):
@@ -541,10 +534,6 @@ async def test_run_async_with_kwargs_and_tool_context_async():
     }
   
   tool = FunctionTool(async_func_with_context_and_kwargs)
-  mock_invocation_context = MagicMock(spec=InvocationContext)
-  mock_invocation_context.session = MagicMock(spec=Session)
-  mock_invocation_context.session.state = MagicMock()
-  tool_context_mock = ToolContext(invocation_context=mock_invocation_context)
   
   # Test that both tool_context and **kwargs parameters work together
   result = await tool.run_async(
@@ -553,7 +542,7 @@ async def test_run_async_with_kwargs_and_tool_context_async():
           "search_query": "async test query",
           "other_param": "async test value"
       },
-      tool_context=tool_context_mock,
+      tool_context=mock_tool_context,
   )
   
   assert result["arg1"] == "async_test_value"
