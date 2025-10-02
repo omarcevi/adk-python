@@ -495,6 +495,8 @@ async def test_run_async_with_kwargs_backward_compatibility(mock_tool_context):
   )
   
   assert result == {"arg1": "test", "arg2": 42}
+  # Explicitly verify that unexpected_param was filtered out and not passed to the function
+  assert "unexpected_param" not in result
 
 
 @pytest.mark.asyncio
