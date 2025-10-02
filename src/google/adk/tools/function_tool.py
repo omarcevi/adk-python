@@ -112,8 +112,9 @@ class FunctionTool(BaseTool):
     )
 
     if has_kwargs:
-      # For functions with **kwargs, we pass all arguments. `args_to_call` is
-      # already correctly populated. We just defensively remove `self`.
+      # For functions with **kwargs, we pass all arguments. We defensively
+      # remove the `self` argument, which may be injected by some tool
+      # frameworks but is not intended for the wrapped function.
       args_to_call.pop('self', None)
     else:
       # For functions without **kwargs, use the original filtering.
