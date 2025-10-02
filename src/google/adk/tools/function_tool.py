@@ -116,6 +116,8 @@ class FunctionTool(BaseTool):
       # remove the `self` argument, which may be injected by some tool
       # frameworks but is not intended for the wrapped function.
       args_to_call.pop('self', None)
+      if 'tool_context' not in valid_params:
+        args_to_call.pop('tool_context', None)
     else:
       # For functions without **kwargs, use the original filtering.
       args_to_call = {k: v for k, v in args_to_call.items() if k in valid_params}
