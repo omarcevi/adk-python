@@ -27,6 +27,7 @@ from typing import Literal
 from typing import Optional
 from typing import Type
 from typing import Union
+import warnings
 
 from google.genai import types
 from pydantic import BaseModel
@@ -111,8 +112,22 @@ ToolUnion: TypeAlias = Union[Callable, BaseTool, BaseToolset]
 
 
 async def _convert_tool_union_to_tools(
-    tool_union: ToolUnion, ctx: ReadonlyContext
+    tool_union: ToolUnion,
+    ctx: ReadonlyContext,
+    model: Union[str, BaseLlm],
+    multiple_tools: bool = False,
 ) -> list[BaseTool]:
+  from ..tools.google_search_tool import google_search
+
+  # Wrap google_search tool with AgentTool if there are multiple tools because
+  # the built-in tools cannot be used together with other tools.
+  # TODO(b/448114567): Remove once the workaround is no longer needed.
+  if multiple_tools and tool_union is google_search:
+    from ..tools.google_search_agent_tool import create_google_search_agent
+    from ..tools.google_search_agent_tool import GoogleSearchAgentTool
+
+    return [GoogleSearchAgentTool(create_google_search_agent(model))]
+
   if isinstance(tool_union, BaseTool):
     return [tool_union]
   if callable(tool_union):
@@ -150,6 +165,10 @@ class LlmAgent(BaseAgent):
 
   global_instruction: Union[str, InstructionProvider] = ''
   """Instructions for all the agents in the entire agent tree.
+
+  DEPRECATED: This field is deprecated and will be removed in a future version.
+  Use GlobalInstructionPlugin instead, which provides the same functionality
+  at the App level. See migration guide for details.
 
   ONLY the global_instruction in root agent will take effect.
 
@@ -431,6 +450,16 @@ class LlmAgent(BaseAgent):
       bypass_state_injection: Whether the instruction is based on
       InstructionProvider.
     """
+    # Issue deprecation warning if global_instruction is being used
+    if self.global_instruction:
+      warnings.warn(
+          'global_instruction field is deprecated and will be removed in a'
+          ' future version. Use GlobalInstructionPlugin instead for the same'
+          ' functionality at the App level. See migration guide for details.',
+          DeprecationWarning,
+          stacklevel=2,
+      )
+
     if isinstance(self.global_instruction, str):
       return self.global_instruction, False
     else:
@@ -447,8 +476,16 @@ class LlmAgent(BaseAgent):
     This method is only for use by Agent Development Kit.
     """
     resolved_tools = []
+    # We may need to wrap some built-in tools if there are other tools
+    # because the built-in tools cannot be used together with other tools.
+    # TODO(b/448114567): Remove once the workaround is no longer needed.
+    multiple_tools = len(self.tools) > 1
     for tool_union in self.tools:
-      resolved_tools.extend(await _convert_tool_union_to_tools(tool_union, ctx))
+      resolved_tools.extend(
+          await _convert_tool_union_to_tools(
+              tool_union, ctx, self.model, multiple_tools
+          )
+      )
     return resolved_tools
 
   @property
