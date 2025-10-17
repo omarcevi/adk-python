@@ -74,7 +74,11 @@ class CrewaiTool(FunctionTool):
     
     CrewAI tools use **kwargs pattern, so we need special parameter filtering
     logic that allows all parameters to pass through while removing only
-    reserved parameters like 'self' and 'tool_context' (if not explicitly needed).
+    reserved parameters like 'self' and 'tool_context'.
+    
+    Note: 'tool_context' is removed from the initial args dictionary to prevent
+    duplicates, but is re-added if the function signature explicitly requires it
+    as a parameter.
     """
     # Preprocess arguments (includes Pydantic model conversion)
     args_to_call = self._preprocess_args(args)

@@ -163,6 +163,11 @@ async def test_crewai_tool_get_declaration():
   # Test function declaration generation
   declaration = tool._get_declaration()
   
+  # Verify the declaration object structure and content
   assert declaration is not None
-  # The declaration should be built using the tool's args_schema
+  assert declaration.name == "test_tool"
+  assert declaration.description == "Test tool"
+  assert declaration.parameters is not None
+  
+  # Verify that the args_schema was used to build the declaration
   mock_crewai_tool.args_schema.model_json_schema.assert_called_once()
