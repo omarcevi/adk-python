@@ -31,46 +31,6 @@ def mock_tool_context() -> ToolContext:
   return ToolContext(invocation_context=mock_invocation_context)
 
 
-def _crewai_style_tool_sync(*args, **kwargs):
-  """CrewAI-style tool that accepts any keyword arguments."""
-  return {
-      "received_args": args,
-      "received_kwargs": kwargs,
-      "search_query": kwargs.get("search_query"),
-      "other_param": kwargs.get("other_param"),
-  }
-
-
-async def _crewai_style_tool_async(*args, **kwargs):
-  """Async CrewAI-style tool that accepts any keyword arguments."""
-  return {
-      "received_args": args,
-      "received_kwargs": kwargs,
-      "search_query": kwargs.get("search_query"),
-      "other_param": kwargs.get("other_param"),
-  }
-
-
-def _func_with_context_and_kwargs_sync(arg1: str, tool_context: ToolContext, **kwargs):
-  """Function with explicit tool_context parameter and **kwargs."""
-  return {
-      "arg1": arg1,
-      "tool_context_present": bool(tool_context),
-      "search_query": kwargs.get("search_query"),
-      "received_kwargs": kwargs,
-  }
-
-
-async def _func_with_context_and_kwargs_async(
-    arg1: str, tool_context: ToolContext, **kwargs
-):
-  """Async function with explicit tool_context parameter and **kwargs."""
-  return {
-      "arg1": arg1,
-      "tool_context_present": bool(tool_context),
-      "search_query": kwargs.get("search_query"),
-      "received_kwargs": kwargs,
-  }
 
 
 def function_for_testing_with_no_args():
@@ -447,36 +407,11 @@ async def test_run_async_with_require_confirmation():
   assert result == {"received_arg": "hello"}
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "tool_function, search_query, other_param",
-    [
-        (_crewai_style_tool_sync, "test_query", "test_value"),
-        (_crewai_style_tool_async, "async test query", "async test value"),
-    ],
-    ids=["sync", "async"],
-)
-async def test_run_async_with_kwargs_crewai_style(
-    mock_tool_context, tool_function, search_query, other_param
-):
-  """Test that run_async works with CrewAI-style functions that use **kwargs."""
-  tool = FunctionTool(tool_function)
-
-  # Test with CrewAI-style parameters that should be passed through
-  result = await tool.run_async(
-      args={"search_query": search_query, "other_param": other_param},
-      tool_context=mock_tool_context,
-  )
-
-  assert result["search_query"] == search_query
-  assert result["other_param"] == other_param
-  assert result["received_kwargs"]["search_query"] == search_query
-  assert result["received_kwargs"]["other_param"] == other_param
 
 
 @pytest.mark.asyncio
-async def test_run_async_with_kwargs_backward_compatibility(mock_tool_context):
-  """Test that the **kwargs fix maintains backward compatibility with explicit parameters."""
+async def test_run_async_parameter_filtering(mock_tool_context):
+  """Test that parameter filtering works correctly for functions with explicit parameters."""
   
   def explicit_params_func(arg1: str, arg2: int):
     """Function with explicit parameters (no **kwargs)."""
@@ -499,43 +434,3 @@ async def test_run_async_with_kwargs_backward_compatibility(mock_tool_context):
   assert "unexpected_param" not in result
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "tool_function, args",
-    [
-        (
-            _func_with_context_and_kwargs_sync,
-            {
-                "arg1": "test_value",
-                "search_query": "omar elcircevi speaker",
-                "other_param": "test_value",
-            },
-        ),
-        (
-            _func_with_context_and_kwargs_async,
-            {
-                "arg1": "async_test_value",
-                "search_query": "async test query",
-                "other_param": "async test value",
-            },
-        ),
-    ],
-    ids=["sync", "async"],
-)
-async def test_run_async_with_kwargs_and_tool_context(
-    mock_tool_context, tool_function, args
-):
-  """Test that run_async works with functions that have both tool_context and **kwargs."""
-  tool = FunctionTool(tool_function)
-
-  # Test that both tool_context and **kwargs parameters work together
-  result = await tool.run_async(
-      args=args,
-      tool_context=mock_tool_context,
-  )
-
-  assert result["arg1"] == args["arg1"]
-  assert result["tool_context_present"] is True
-  assert result["search_query"] == args["search_query"]
-  assert result["received_kwargs"]["search_query"] == args["search_query"]
-  assert result["received_kwargs"]["other_param"] == args["other_param"]

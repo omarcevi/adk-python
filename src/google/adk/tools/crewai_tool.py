@@ -14,6 +14,10 @@
 
 from __future__ import annotations
 
+import inspect
+from typing import Any
+from typing import Callable
+
 from google.genai import types
 from typing_extensions import override
 
@@ -21,6 +25,7 @@ from . import _automatic_function_calling_util
 from .function_tool import FunctionTool
 from .tool_configs import BaseToolConfig
 from .tool_configs import ToolArgsConfig
+from .tool_context import ToolContext
 
 try:
   from crewai.tools import BaseTool as CrewaiBaseTool
@@ -60,6 +65,90 @@ class CrewaiTool(FunctionTool):
       self.description = description
     elif tool.description:
       self.description = tool.description
+
+  @override
+  async def run_async(
+      self, *, args: dict[str, Any], tool_context: ToolContext
+  ) -> Any:
+    """Override run_async to handle CrewAI-specific parameter filtering.
+    
+    CrewAI tools use **kwargs pattern, so we need special parameter filtering
+    logic that allows all parameters to pass through while removing only
+    reserved parameters like 'self' and 'tool_context' (if not explicitly needed).
+    """
+    # Preprocess arguments (includes Pydantic model conversion)
+    args_to_call = self._preprocess_args(args)
+
+    signature = inspect.signature(self.func)
+    valid_params = {param for param in signature.parameters}
+
+    # Check if function accepts **kwargs
+    has_kwargs = any(
+        param.kind == inspect.Parameter.VAR_KEYWORD 
+        for param in signature.parameters.values()
+    )
+
+    if has_kwargs:
+      # For functions with **kwargs, we pass all arguments. We defensively
+      # remove arguments like `self` that are managed by the framework and not
+      # intended to be passed through **kwargs.
+      args_to_call.pop('self', None)
+      # We also remove `tool_context` that might have been passed in `args`,
+      # as it will be explicitly injected later if it's a valid parameter.
+      args_to_call.pop('tool_context', None)
+    else:
+      # For functions without **kwargs, use the original filtering.
+      args_to_call = {k: v for k, v in args_to_call.items() if k in valid_params}
+
+    # Inject tool_context if it's an explicit parameter. This will add it
+    # or overwrite any value that might have been passed in `args`.
+    if 'tool_context' in valid_params:
+      args_to_call['tool_context'] = tool_context
+
+    # Check for missing mandatory arguments
+    mandatory_args = self._get_mandatory_args()
+    missing_mandatory_args = [
+        arg for arg in mandatory_args if arg not in args_to_call
+    ]
+
+    if missing_mandatory_args:
+      missing_mandatory_args_str = '\n'.join(missing_mandatory_args)
+      error_str = f"""Invoking `{self.name}()` failed as the following mandatory input parameters are not present:
+{missing_mandatory_args_str}
+You could retry calling this tool, but it is IMPORTANT for you to provide all the mandatory parameters."""
+      return {'error': error_str}
+
+    # Handle tool confirmation if required
+    if isinstance(self._require_confirmation, Callable):
+      require_confirmation = await self._invoke_callable(
+          self._require_confirmation, args_to_call
+      )
+    else:
+      require_confirmation = bool(self._require_confirmation)
+
+    if require_confirmation:
+      if not tool_context.tool_confirmation:
+        args_to_show = args_to_call.copy()
+        if 'tool_context' in args_to_show:
+          args_to_show.pop('tool_context')
+
+        tool_context.request_confirmation(
+            hint=(
+                f'Please approve or reject the tool call {self.name}() by'
+                ' responding with a FunctionResponse with an expected'
+                ' ToolConfirmation payload.'
+            ),
+        )
+        return {
+            'error': (
+                'This tool call requires confirmation, please approve or'
+                ' reject.'
+            )
+        }
+      elif not tool_context.tool_confirmation.confirmed:
+        return {'error': 'This tool call is rejected.'}
+
+    return await self._invoke_callable(self.func, args_to_call)
 
   @override
   def _get_declaration(self) -> types.FunctionDeclaration:
