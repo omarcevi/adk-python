@@ -306,6 +306,111 @@ async def test_save_load_delete(service_type, artifact_service_factory):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "service_type",
+    [
+        ArtifactServiceType.IN_MEMORY,
+        ArtifactServiceType.GCS,
+    ],
+)
+@pytest.mark.parametrize("session_id", ["user", "user/x", "user\\x"])
+async def test_save_artifact_rejects_reserved_user_as_session_id(
+    service_type, session_id, artifact_service_factory
+):
+  """IN_MEMORY and GCS lay session-scoped and user-scoped artifacts out in
+  the same flat namespace, using the literal segment "user" to mark
+  user-scoped ones. A session actually named "user" (or starting with "user/")
+  must be rejected rather than silently colliding with that reserved segment."""
+  artifact_service = artifact_service_factory(service_type)
+
+  with pytest.raises(InputValidationError, match="reserved value 'user'"):
+    await artifact_service.save_artifact(
+        app_name="app0",
+        user_id="user0",
+        session_id=session_id,
+        filename="report.txt",
+        artifact=types.Part(text="hello"),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("session_id", ["user", "user/x", "user\\x"])
+async def test_file_allows_reserved_user_as_session_id(
+    session_id,
+    artifact_service_factory,
+):
+  """Unlike IN_MEMORY and GCS, FILE lays session-scoped artifacts out under
+  their own `sessions/<id>/` subtree, distinct from the user-scoped
+  `artifacts/` subtree, so a session literally named "user" cannot collide
+  with it and is not rejected."""
+  artifact_service = artifact_service_factory(ArtifactServiceType.FILE)
+
+  await artifact_service.save_artifact(
+      app_name="app0",
+      user_id="user0",
+      session_id=session_id,
+      filename="report.txt",
+      artifact=types.Part(text="hello"),
+  )
+  loaded = await artifact_service.load_artifact(
+      app_name="app0",
+      user_id="user0",
+      session_id=session_id,
+      filename="report.txt",
+  )
+  assert loaded == types.Part(text="hello")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "service_type",
+    [
+        ArtifactServiceType.IN_MEMORY,
+        ArtifactServiceType.GCS,
+    ],
+)
+@pytest.mark.parametrize("session_id", ["user", "user/x", "user\\x"])
+async def test_read_and_delete_paths_allow_reserved_user_as_session_id(
+    service_type, session_id, artifact_service_factory
+):
+  """Reads and deletes must remain permissive for session IDs named "user" or
+  starting with "user/", so existing data already stored under that prefix in a
+  live bucket or memory store remains reachable and removable."""
+  artifact_service = artifact_service_factory(service_type)
+
+  assert (
+      await artifact_service.list_artifact_keys(
+          app_name="app0", user_id="user0", session_id=session_id
+      )
+      == []
+  )
+  assert (
+      await artifact_service.load_artifact(
+          app_name="app0",
+          user_id="user0",
+          session_id=session_id,
+          filename="report.txt",
+      )
+      is None
+  )
+  assert (
+      await artifact_service.list_versions(
+          app_name="app0",
+          user_id="user0",
+          session_id=session_id,
+          filename="report.txt",
+      )
+      == []
+  )
+  await artifact_service.delete_artifact(
+      app_name="app0",
+      user_id="user0",
+      session_id=session_id,
+      filename="report.txt",
+  )
+
+
+@pytest.mark.asyncio
 async def test_in_memory_loads_nested_artifact_reference(
     artifact_service_factory,
 ):
