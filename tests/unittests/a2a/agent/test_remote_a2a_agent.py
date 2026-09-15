@@ -42,6 +42,7 @@ from google.adk.a2a.agent import A2aCardRequestConfig
 from google.adk.a2a.agent import CardRequestInterceptor
 from google.adk.a2a.agent import ParametersConfig
 from google.adk.a2a.agent import RequestInterceptor
+import google.adk.a2a.agent._remote_a2a_agent as remote_a2a_agent
 from google.adk.a2a.agent.config import A2aRemoteAgentConfig
 from google.adk.a2a.agent.utils import execute_after_request_interceptors
 from google.adk.a2a.agent.utils import execute_before_card_request_interceptors
@@ -54,7 +55,6 @@ from google.adk.agents.llm.task._finish_task_tool import FINISH_TASK_TOOL_NAME
 from google.adk.agents.remote_a2a_agent import A2A_METADATA_PREFIX
 from google.adk.agents.remote_a2a_agent import AgentCardResolutionError
 from google.adk.agents.remote_a2a_agent import RemoteA2aAgent
-import google.adk.agents.remote_a2a_agent as remote_a2a_agent
 from google.adk.auth.auth_credential import AuthCredential
 from google.adk.auth.auth_credential import AuthCredentialTypes
 from google.adk.auth.auth_credential import OAuth2Auth
@@ -244,6 +244,40 @@ def _make_multi_interface_card(interfaces) -> AgentCard:
           for url, transport in extra
       ],
   )
+
+
+class TestRemoteA2aAgentBackwardCompatibility:
+  """Test that google.adk.agents.remote_a2a_agent preserves backward compatibility."""
+
+  def test_reexport_identity(self):
+    from google.adk.a2a.agent import RemoteA2aAgent as CanonicalRemoteA2aAgent
+    from google.adk.a2a.agent._remote_a2a_agent import A2AClientError as CanonicalA2AClientError
+    from google.adk.a2a.agent._remote_a2a_agent import AGENT_CARD_WELL_KNOWN_PATH as CanonicalPath
+    from google.adk.a2a.agent._remote_a2a_agent import AgentCardResolutionError as CanonicalAgentCardResolutionError
+    from google.adk.agents.remote_a2a_agent import A2AClientError
+    from google.adk.agents.remote_a2a_agent import AGENT_CARD_WELL_KNOWN_PATH
+    from google.adk.agents.remote_a2a_agent import AgentCardResolutionError
+    from google.adk.agents.remote_a2a_agent import RemoteA2aAgent
+
+    assert RemoteA2aAgent is CanonicalRemoteA2aAgent
+    assert A2AClientError is CanonicalA2AClientError
+    assert AgentCardResolutionError is CanonicalAgentCardResolutionError
+    assert AGENT_CARD_WELL_KNOWN_PATH == CanonicalPath
+
+  def test_a2a_agent_lazy_exports(self):
+    from google.adk.a2a import agent as a2a_agent
+    from google.adk.a2a.agent._remote_a2a_agent import A2AClientError as CanonicalA2AClientError
+    from google.adk.a2a.agent._remote_a2a_agent import AgentCardResolutionError as CanonicalAgentCardResolutionError
+    from google.adk.a2a.agent._remote_a2a_agent import RemoteA2aAgent as CanonicalRemoteA2aAgent
+
+    assert hasattr(a2a_agent, "RemoteA2aAgent")
+    assert a2a_agent.RemoteA2aAgent is CanonicalRemoteA2aAgent
+    assert hasattr(a2a_agent, "A2AClientError")
+    assert a2a_agent.A2AClientError is CanonicalA2AClientError
+    assert hasattr(a2a_agent, "AgentCardResolutionError")
+    assert (
+        a2a_agent.AgentCardResolutionError is CanonicalAgentCardResolutionError
+    )
 
 
 class TestRemoteA2aAgentInit:
@@ -487,7 +521,7 @@ class TestRemoteA2aAgentResolution:
       mock_ensure_client.return_value = mock_client
 
       with patch(
-          "google.adk.agents.remote_a2a_agent.A2ACardResolver"
+          "google.adk.a2a.agent._remote_a2a_agent.A2ACardResolver"
       ) as mock_resolver_class:
         mock_resolver = AsyncMock()
         mock_resolver.get_agent_card.return_value = self.agent_card
@@ -533,7 +567,7 @@ class TestRemoteA2aAgentResolution:
     with patch.object(agent, "_ensure_httpx_client") as mock_ensure_client:
       mock_ensure_client.return_value = AsyncMock()
       with patch(
-          "google.adk.agents.remote_a2a_agent.A2ACardResolver"
+          "google.adk.a2a.agent._remote_a2a_agent.A2ACardResolver"
       ) as mock_resolver_class:
         mock_resolver = AsyncMock()
         mock_resolver.get_agent_card.return_value = self.agent_card
@@ -555,7 +589,7 @@ class TestRemoteA2aAgentResolution:
     with patch.object(agent, "_ensure_httpx_client") as mock_ensure_client:
       mock_ensure_client.return_value = AsyncMock()
       with patch(
-          "google.adk.agents.remote_a2a_agent.A2ACardResolver"
+          "google.adk.a2a.agent._remote_a2a_agent.A2ACardResolver"
       ) as mock_resolver_class:
         mock_resolver = AsyncMock()
         mock_resolver.get_agent_card.return_value = self.agent_card
@@ -587,7 +621,7 @@ class TestRemoteA2aAgentResolution:
     with patch.object(agent, "_ensure_httpx_client") as mock_ensure_client:
       mock_ensure_client.return_value = AsyncMock()
       with patch(
-          "google.adk.agents.remote_a2a_agent.A2ACardResolver"
+          "google.adk.a2a.agent._remote_a2a_agent.A2ACardResolver"
       ) as mock_resolver_class:
         mock_resolver = AsyncMock()
         mock_resolver.get_agent_card.return_value = self.agent_card
@@ -626,7 +660,7 @@ class TestRemoteA2aAgentResolution:
     with patch.object(agent, "_ensure_httpx_client") as mock_ensure_client:
       mock_ensure_client.return_value = AsyncMock()
       with patch(
-          "google.adk.agents.remote_a2a_agent.A2ACardResolver"
+          "google.adk.a2a.agent._remote_a2a_agent.A2ACardResolver"
       ) as mock_resolver_class:
         mock_resolver = AsyncMock()
         mock_resolver.get_agent_card.return_value = self.agent_card
@@ -1081,7 +1115,7 @@ class TestRemoteA2aAgentResolution:
       mock_client_class.return_value = mock_client
 
       with patch(
-          "google.adk.agents.remote_a2a_agent.A2AClientFactory"
+          "google.adk.a2a.agent._remote_a2a_agent.A2AClientFactory"
       ) as mock_factory_class:
         mock_factory = Mock()
         mock_a2a_client = Mock()
@@ -1138,12 +1172,14 @@ class TestRemoteA2aAgentResolution:
       with patch.object(agent, "_ensure_httpx_client") as mock_ensure_client:
         mock_client = AsyncMock()
         mock_ensure_client.return_value = mock_client
+        agent._a2a_client_factory = Mock()
 
         with patch(
-            "google.adk.agents.remote_a2a_agent.A2AClient"
+            "google.adk.a2a.agent._remote_a2a_agent.A2AClient"
         ) as mock_client_class:
           mock_a2a_client = AsyncMock()
           mock_client_class.return_value = mock_a2a_client
+          agent._a2a_client_factory.create.return_value = mock_a2a_client
 
           await agent._ensure_resolved(Mock())
 
@@ -1162,6 +1198,7 @@ class TestRemoteA2aAgentResolution:
 
     with patch.object(agent, "_resolve_agent_card") as mock_resolve:
       mock_resolve.return_value = agent_card
+      agent._a2a_client_factory = Mock()
       with patch.object(agent, "_ensure_httpx_client"):
         await agent._ensure_resolved(Mock())
 
@@ -1190,6 +1227,7 @@ class TestRemoteA2aAgentResolution:
 
     with patch.object(agent, "_resolve_agent_card") as mock_resolve:
       mock_resolve.return_value = agent_card
+      agent._a2a_client_factory = Mock()
       with patch.object(agent, "_ensure_httpx_client"):
         await agent._ensure_resolved(Mock())
 
@@ -1207,6 +1245,7 @@ class TestRemoteA2aAgentResolution:
 
     with patch.object(agent, "_resolve_agent_card") as mock_resolve:
       mock_resolve.return_value = agent_card
+      agent._a2a_client_factory = Mock()
       with patch.object(agent, "_ensure_httpx_client"):
         await agent._ensure_resolved(Mock())
 
@@ -1243,7 +1282,7 @@ class TestRemoteA2aAgentResolution:
     ):
       with patch("httpx.AsyncClient", return_value=AsyncMock()):
         with patch(
-            "google.adk.agents.remote_a2a_agent.A2AClientFactory"
+            "google.adk.a2a.agent._remote_a2a_agent.A2AClientFactory"
         ) as mock_factory_class:
           mock_factory = Mock()
           mock_factory.create.return_value = Mock()
@@ -1288,7 +1327,7 @@ class TestRemoteA2aAgentMessageHandling:
   def test_create_a2a_request_for_user_function_response_no_function_call(self):
     """Test function response request creation when no function call exists."""
     with patch(
-        "google.adk.agents.remote_a2a_agent.find_matching_function_call"
+        "google.adk.a2a.agent._remote_a2a_agent.find_matching_function_call"
     ) as mock_find:
       mock_find.return_value = None
 
@@ -1319,12 +1358,12 @@ class TestRemoteA2aAgentMessageHandling:
     self.mock_session.events = [mock_latest_event]
 
     with patch(
-        "google.adk.agents.remote_a2a_agent.find_matching_function_call"
+        "google.adk.a2a.agent._remote_a2a_agent.find_matching_function_call"
     ) as mock_find:
       mock_find.return_value = mock_function_event
 
       with patch(
-          "google.adk.agents.remote_a2a_agent.convert_event_to_a2a_message"
+          "google.adk.a2a.agent._remote_a2a_agent.convert_event_to_a2a_message"
       ) as mock_convert:
         # Create a proper mock A2A message
         mock_a2a_message = create_autospec(A2AMessage, instance=True)
@@ -1354,7 +1393,7 @@ class TestRemoteA2aAgentMessageHandling:
     self.mock_session.events = [mock_event]
 
     with patch(
-        "google.adk.agents.remote_a2a_agent._present_other_agent_message"
+        "google.adk.a2a.agent._remote_a2a_agent._present_other_agent_message"
     ) as mock_convert:
       mock_convert.return_value = mock_event
 
@@ -1384,7 +1423,7 @@ class TestRemoteA2aAgentMessageHandling:
     self.mock_session.events = [mock_event]
 
     with patch(
-        "google.adk.agents.remote_a2a_agent._present_other_agent_message"
+        "google.adk.a2a.agent._remote_a2a_agent._present_other_agent_message"
     ) as mock_convert:
       mock_convert.return_value = mock_event
 
@@ -1414,7 +1453,7 @@ class TestRemoteA2aAgentMessageHandling:
     self.mock_session.events = [mock_event]
 
     with patch(
-        "google.adk.agents.remote_a2a_agent._present_other_agent_message"
+        "google.adk.a2a.agent._remote_a2a_agent._present_other_agent_message"
     ) as mock_convert:
       mock_convert.return_value = mock_event
 
@@ -1467,7 +1506,7 @@ class TestRemoteA2aAgentMessageHandling:
     self.mock_session.events = [mock_event]
 
     with patch(
-        "google.adk.agents.remote_a2a_agent._present_other_agent_message"
+        "google.adk.a2a.agent._remote_a2a_agent._present_other_agent_message"
     ) as mock_present:
       mock_present.return_value = mock_event
 
@@ -1653,7 +1692,7 @@ class TestRemoteA2aAgentMessageHandling:
     self.mock_genai_part_converter.side_effect = mock_converter
 
     with patch(
-        "google.adk.agents.remote_a2a_agent._present_other_agent_message"
+        "google.adk.a2a.agent._remote_a2a_agent._present_other_agent_message"
     ) as mock_present:
       mock_present.side_effect = lambda event: event
       parts, context_id = self.agent._construct_message_parts_from_session(
@@ -1717,7 +1756,7 @@ class TestRemoteA2aAgentMessageHandling:
     self.mock_genai_part_converter.side_effect = mock_converter
 
     with patch(
-        "google.adk.agents.remote_a2a_agent._present_other_agent_message"
+        "google.adk.a2a.agent._remote_a2a_agent._present_other_agent_message"
     ) as mock_present:
       mock_present.side_effect = lambda event: event
       parts, context_id = self.agent._construct_message_parts_from_session(
@@ -1771,7 +1810,7 @@ class TestRemoteA2aAgentMessageHandling:
     self.mock_genai_part_converter.side_effect = mock_converter
 
     with patch(
-        "google.adk.agents.remote_a2a_agent._present_other_agent_message"
+        "google.adk.a2a.agent._remote_a2a_agent._present_other_agent_message"
     ) as mock_present:
       mock_present.side_effect = lambda event: event
       parts, context_id = self.agent._construct_message_parts_from_session(
@@ -1795,7 +1834,7 @@ class TestRemoteA2aAgentMessageHandling:
     )
 
     with patch(
-        "google.adk.agents.remote_a2a_agent.convert_a2a_message_to_event"
+        "google.adk.a2a.agent._remote_a2a_agent.convert_a2a_message_to_event"
     ) as mock_convert:
       mock_convert.return_value = mock_event
 
@@ -1821,7 +1860,7 @@ class TestRemoteA2aAgentMessageHandling:
     mock_a2a_message.context_id = "context-123"
 
     with patch(
-        "google.adk.agents.remote_a2a_agent.convert_a2a_message_to_event"
+        "google.adk.a2a.agent._remote_a2a_agent.convert_a2a_message_to_event"
     ) as mock_convert:
       mock_convert.return_value = None
 
@@ -1914,7 +1953,7 @@ class TestRemoteA2aAgentMessageHandling:
     self.mock_session.events = [user_event, other_agent_event]
 
     with patch(
-        "google.adk.agents.remote_a2a_agent._present_other_agent_message"
+        "google.adk.a2a.agent._remote_a2a_agent._present_other_agent_message"
     ) as mock_present:
       # Mock _present_other_agent_message to return the transformed event
       mock_present.return_value = other_agent_event
@@ -2169,7 +2208,7 @@ class TestRemoteA2aAgentMessageHandling:
     )
 
     with patch(
-        "google.adk.agents.remote_a2a_agent.convert_a2a_message_to_event"
+        "google.adk.a2a.agent._remote_a2a_agent.convert_a2a_message_to_event"
     ) as mock_convert:
       mock_convert.return_value = mock_event
 
@@ -2217,7 +2256,7 @@ class TestRemoteA2aAgentMessageHandling:
     )
 
     with patch(
-        "google.adk.agents.remote_a2a_agent.convert_a2a_message_to_event"
+        "google.adk.a2a.agent._remote_a2a_agent.convert_a2a_message_to_event"
     ) as mock_convert:
       mock_convert.return_value = mock_event
 
@@ -2329,7 +2368,7 @@ class TestRemoteA2aAgentMessageHandling:
     )
 
     with patch(
-        "google.adk.agents.remote_a2a_agent.convert_a2a_message_to_event"
+        "google.adk.a2a.agent._remote_a2a_agent.convert_a2a_message_to_event"
     ) as mock_convert:
       mock_convert.return_value = mock_event
 
@@ -2400,7 +2439,7 @@ class TestRemoteA2aAgentMessageHandling:
     )
 
     with patch(
-        "google.adk.agents.remote_a2a_agent.convert_a2a_message_to_event"
+        "google.adk.a2a.agent._remote_a2a_agent.convert_a2a_message_to_event"
     ) as mock_convert:
       mock_convert.return_value = mock_event
 
@@ -2429,7 +2468,7 @@ class TestRemoteA2aAgentMessageHandling:
     )
 
     with patch(
-        "google.adk.agents.remote_a2a_agent.convert_a2a_message_to_event"
+        "google.adk.a2a.agent._remote_a2a_agent.convert_a2a_message_to_event"
     ) as mock_convert:
       mock_convert.return_value = mock_event
 
@@ -2464,7 +2503,7 @@ class TestRemoteA2aAgentMessageHandling:
     )
 
     with patch(
-        "google.adk.agents.remote_a2a_agent.convert_a2a_message_to_event"
+        "google.adk.a2a.agent._remote_a2a_agent.convert_a2a_message_to_event"
     ) as mock_convert:
       mock_convert.return_value = mock_event
 
@@ -2493,7 +2532,7 @@ class TestRemoteA2aAgentMessageHandling:
     )
 
     with patch(
-        "google.adk.agents.remote_a2a_agent.convert_a2a_message_to_event"
+        "google.adk.a2a.agent._remote_a2a_agent.convert_a2a_message_to_event"
     ) as mock_convert:
       result = await self.agent._handle_a2a_response(
           (mock_a2a_task, update), self.mock_context
@@ -2620,7 +2659,7 @@ class TestRemoteA2aAgentTaskModeMessageHandling:
     self.mock_genai_part_converter.side_effect = mock_converter
 
     with patch(
-        "google.adk.agents.remote_a2a_agent._present_other_agent_message"
+        "google.adk.a2a.agent._remote_a2a_agent._present_other_agent_message"
     ) as mock_present:
       mock_present.side_effect = lambda event: event
 
@@ -2675,7 +2714,7 @@ class TestRemoteA2aAgentTaskModeMessageHandling:
     self.mock_genai_part_converter.side_effect = mock_converter
 
     with patch(
-        "google.adk.agents.remote_a2a_agent._present_other_agent_message"
+        "google.adk.a2a.agent._remote_a2a_agent._present_other_agent_message"
     ) as mock_present:
       mock_present.side_effect = lambda event: event
 
@@ -2767,7 +2806,7 @@ class TestRemoteA2aAgentTaskModeMessageHandling:
     self.mock_genai_part_converter.side_effect = mock_converter
 
     with patch(
-        "google.adk.agents.remote_a2a_agent._present_other_agent_message"
+        "google.adk.a2a.agent._remote_a2a_agent._present_other_agent_message"
     ) as mock_present:
       mock_present.side_effect = lambda event: event
 
@@ -2821,7 +2860,7 @@ class TestRemoteA2aAgentTaskModeMessageHandling:
     self.mock_genai_part_converter.side_effect = mock_converter
 
     with patch(
-        "google.adk.agents.remote_a2a_agent._present_other_agent_message"
+        "google.adk.a2a.agent._remote_a2a_agent._present_other_agent_message"
     ) as mock_present:
       mock_present.side_effect = lambda event: event
 
@@ -2881,7 +2920,7 @@ class TestRemoteA2aAgentTaskModeMessageHandling:
     self.mock_genai_part_converter.side_effect = mock_converter
 
     with patch(
-        "google.adk.agents.remote_a2a_agent._present_other_agent_message"
+        "google.adk.a2a.agent._remote_a2a_agent._present_other_agent_message"
     ) as mock_present:
       mock_present.side_effect = lambda event: event
 
@@ -2959,10 +2998,10 @@ class TestRemoteA2aAgentTaskModeMessageHandling:
 
     with (
         patch(
-            "google.adk.agents.remote_a2a_agent._present_other_agent_message"
+            "google.adk.a2a.agent._remote_a2a_agent._present_other_agent_message"
         ) as mock_present,
         patch(
-            "google.adk.agents.remote_a2a_agent._compat.part_metadata"
+            "google.adk.a2a.agent._remote_a2a_agent._compat.part_metadata"
         ) as mock_part_metadata,
     ):
       mock_present.side_effect = lambda event: event
@@ -3065,7 +3104,7 @@ class TestRemoteA2aAgentMessageHandlingFromFactory:
   def test_create_a2a_request_for_user_function_response_no_function_call(self):
     """Test function response request creation when no function call exists."""
     with patch(
-        "google.adk.agents.remote_a2a_agent.find_matching_function_call"
+        "google.adk.a2a.agent._remote_a2a_agent.find_matching_function_call"
     ) as mock_find:
       mock_find.return_value = None
 
@@ -3096,12 +3135,12 @@ class TestRemoteA2aAgentMessageHandlingFromFactory:
     self.mock_session.events = [mock_latest_event]
 
     with patch(
-        "google.adk.agents.remote_a2a_agent.find_matching_function_call"
+        "google.adk.a2a.agent._remote_a2a_agent.find_matching_function_call"
     ) as mock_find:
       mock_find.return_value = mock_function_event
 
       with patch(
-          "google.adk.agents.remote_a2a_agent.convert_event_to_a2a_message"
+          "google.adk.a2a.agent._remote_a2a_agent.convert_event_to_a2a_message"
       ) as mock_convert:
         # Create a proper mock A2A message
         mock_a2a_message = Mock(spec=A2AMessage)
@@ -3131,7 +3170,7 @@ class TestRemoteA2aAgentMessageHandlingFromFactory:
     self.mock_session.events = [mock_event]
 
     with patch(
-        "google.adk.agents.remote_a2a_agent._present_other_agent_message"
+        "google.adk.a2a.agent._remote_a2a_agent._present_other_agent_message"
     ) as mock_convert:
       mock_convert.return_value = mock_event
 
@@ -3174,7 +3213,7 @@ class TestRemoteA2aAgentMessageHandlingFromFactory:
     )
 
     with patch(
-        "google.adk.agents.remote_a2a_agent.convert_a2a_message_to_event"
+        "google.adk.a2a.agent._remote_a2a_agent.convert_a2a_message_to_event"
     ) as mock_convert:
       mock_convert.return_value = mock_event
 
@@ -3309,7 +3348,7 @@ class TestRemoteA2aAgentMessageHandlingFromFactory:
     )
 
     with patch(
-        "google.adk.agents.remote_a2a_agent.convert_a2a_message_to_event"
+        "google.adk.a2a.agent._remote_a2a_agent.convert_a2a_message_to_event"
     ) as mock_convert:
       mock_convert.return_value = mock_event
 
@@ -3357,7 +3396,7 @@ class TestRemoteA2aAgentMessageHandlingFromFactory:
     )
 
     with patch(
-        "google.adk.agents.remote_a2a_agent.convert_a2a_message_to_event"
+        "google.adk.a2a.agent._remote_a2a_agent.convert_a2a_message_to_event"
     ) as mock_convert:
       mock_convert.return_value = mock_event
 
@@ -3412,7 +3451,7 @@ class TestRemoteA2aAgentMessageHandlingFromFactory:
     )
 
     with patch(
-        "google.adk.agents.remote_a2a_agent.convert_a2a_message_to_event"
+        "google.adk.a2a.agent._remote_a2a_agent.convert_a2a_message_to_event"
     ) as mock_convert:
       mock_convert.return_value = mock_event
 
@@ -3447,7 +3486,7 @@ class TestRemoteA2aAgentMessageHandlingFromFactory:
     )
 
     with patch(
-        "google.adk.agents.remote_a2a_agent.convert_a2a_message_to_event"
+        "google.adk.a2a.agent._remote_a2a_agent.convert_a2a_message_to_event"
     ) as mock_convert:
       mock_convert.return_value = mock_event
 
@@ -3835,7 +3874,7 @@ class TestRemoteA2aAgentNoneConverterResults:
     mock_msg.context_id = "context-123"
 
     with patch(
-        "google.adk.agents.remote_a2a_agent.convert_a2a_message_to_event"
+        "google.adk.a2a.agent._remote_a2a_agent.convert_a2a_message_to_event"
     ) as mock_convert:
       mock_convert.return_value = None
 
@@ -3856,7 +3895,7 @@ class TestRemoteA2aAgentNoneConverterResults:
     mock_task.status.state = _compat.TS_COMPLETED
 
     with patch(
-        "google.adk.agents.remote_a2a_agent.convert_a2a_task_to_event"
+        "google.adk.a2a.agent._remote_a2a_agent.convert_a2a_task_to_event"
     ) as mock_convert:
       mock_convert.return_value = None
 
@@ -3879,7 +3918,7 @@ class TestRemoteA2aAgentNoneConverterResults:
     mock_update.status.state = _compat.TS_WORKING
 
     with patch(
-        "google.adk.agents.remote_a2a_agent.convert_a2a_message_to_event"
+        "google.adk.a2a.agent._remote_a2a_agent.convert_a2a_message_to_event"
     ) as mock_convert:
       mock_convert.return_value = None
 
@@ -3899,7 +3938,7 @@ class TestRemoteA2aAgentNoneConverterResults:
     update = _make_artifact_chunk("chunk", append=False, last_chunk=True)
 
     with patch(
-        "google.adk.agents.remote_a2a_agent.convert_a2a_message_to_event"
+        "google.adk.a2a.agent._remote_a2a_agent.convert_a2a_message_to_event"
     ) as mock_convert:
       mock_convert.return_value = None
 
@@ -4025,10 +4064,10 @@ class TestRemoteA2aAgentExecution:
 
             # Mock the logging functions to avoid iteration issues
             with patch(
-                "google.adk.agents.remote_a2a_agent.build_a2a_request_log"
+                "google.adk.a2a.agent._remote_a2a_agent.build_a2a_request_log"
             ) as mock_req_log:
               with patch(
-                  "google.adk.agents.remote_a2a_agent.build_a2a_response_log"
+                  "google.adk.a2a.agent._remote_a2a_agent.build_a2a_response_log"
               ) as mock_resp_log:
                 mock_req_log.return_value = "Mock request log"
                 mock_resp_log.return_value = "Mock response log"
@@ -4095,11 +4134,11 @@ class TestRemoteA2aAgentExecution:
           with patch.object(self.agent, "_handle_a2a_response") as mock_handle:
             mock_handle.return_value = mock_event
             with patch(
-                "google.adk.agents.remote_a2a_agent.build_a2a_request_log",
+                "google.adk.a2a.agent._remote_a2a_agent.build_a2a_request_log",
                 return_value="Mock request log",
             ):
               with patch(
-                  "google.adk.agents.remote_a2a_agent.build_a2a_response_log",
+                  "google.adk.a2a.agent._remote_a2a_agent.build_a2a_response_log",
                   return_value="Mock response log",
               ):
                 with patch(
@@ -4173,10 +4212,10 @@ class TestRemoteA2aAgentExecution:
             mock_handle.return_value = mock_event
 
             with patch(
-                "google.adk.agents.remote_a2a_agent.build_a2a_request_log"
+                "google.adk.a2a.agent._remote_a2a_agent.build_a2a_request_log"
             ) as mock_req_log:
               with patch(
-                  "google.adk.agents.remote_a2a_agent.build_a2a_response_log"
+                  "google.adk.a2a.agent._remote_a2a_agent.build_a2a_response_log"
               ) as mock_resp_log:
                 mock_req_log.return_value = "Mock request log"
                 mock_resp_log.return_value = "Mock response log"
@@ -4186,7 +4225,7 @@ class TestRemoteA2aAgentExecution:
                     return_value={"k": "v"},
                 ):
                   with patch(
-                      "google.adk.agents.remote_a2a_agent.A2AMessage"
+                      "google.adk.a2a.agent._remote_a2a_agent.A2AMessage"
                   ) as mock_message_class:
                     mock_message = Mock(spec=A2AMessage)
                     mock_message_class.return_value = mock_message
@@ -4293,10 +4332,10 @@ class TestRemoteA2aAgentExecution:
             mock_handle.return_value = mock_event
 
             with patch(
-                "google.adk.agents.remote_a2a_agent.build_a2a_request_log"
+                "google.adk.a2a.agent._remote_a2a_agent.build_a2a_request_log"
             ):
               with patch(
-                  "google.adk.agents.remote_a2a_agent.build_a2a_response_log"
+                  "google.adk.a2a.agent._remote_a2a_agent.build_a2a_response_log"
               ):
                 with patch(
                     "google.adk.a2a._compat.a2a_to_dict",
@@ -4337,7 +4376,7 @@ class TestRemoteA2aAgentExecution:
 
           # Mock the logging functions to avoid iteration issues
           with patch(
-              "google.adk.agents.remote_a2a_agent.build_a2a_request_log"
+              "google.adk.a2a.agent._remote_a2a_agent.build_a2a_request_log"
           ) as mock_req_log:
             mock_req_log.return_value = "Mock request log"
 
@@ -4508,7 +4547,7 @@ class TestRemoteA2aAgentExecution:
           agent._a2a_client = mock_a2a_client
 
           with patch(
-              "google.adk.agents.remote_a2a_agent.build_a2a_request_log"
+              "google.adk.a2a.agent._remote_a2a_agent.build_a2a_request_log"
           ) as mock_req_log:
             mock_req_log.return_value = "Mock request log"
 
@@ -4608,10 +4647,10 @@ class TestRemoteA2aAgentExecution:
             mock_handle.return_value = mock_event
 
             with patch(
-                "google.adk.agents.remote_a2a_agent.build_a2a_request_log"
+                "google.adk.a2a.agent._remote_a2a_agent.build_a2a_request_log"
             ) as mock_req_log:
               with patch(
-                  "google.adk.agents.remote_a2a_agent.build_a2a_response_log"
+                  "google.adk.a2a.agent._remote_a2a_agent.build_a2a_response_log"
               ) as mock_resp_log:
                 mock_req_log.return_value = "Mock request log"
                 mock_resp_log.return_value = "Mock response log"
@@ -4744,10 +4783,10 @@ class TestRemoteA2aAgentExecutionFromFactory:
             mock_handle.return_value = mock_event
 
             with patch(
-                "google.adk.agents.remote_a2a_agent.build_a2a_request_log"
+                "google.adk.a2a.agent._remote_a2a_agent.build_a2a_request_log"
             ) as mock_req_log:
               with patch(
-                  "google.adk.agents.remote_a2a_agent.build_a2a_response_log"
+                  "google.adk.a2a.agent._remote_a2a_agent.build_a2a_response_log"
               ) as mock_resp_log:
                 mock_req_log.return_value = "Mock request log"
                 mock_resp_log.return_value = "Mock response log"
@@ -4798,7 +4837,7 @@ class TestRemoteA2aAgentExecutionFromFactory:
 
           # Mock the logging functions to avoid iteration issues
           with patch(
-              "google.adk.agents.remote_a2a_agent.build_a2a_request_log"
+              "google.adk.a2a.agent._remote_a2a_agent.build_a2a_request_log"
           ) as mock_req_log:
             mock_req_log.return_value = "Mock request log"
 
@@ -4942,12 +4981,12 @@ class TestRemoteA2aAgentIntegration:
 
     # Mock dependencies
     with patch(
-        "google.adk.agents.remote_a2a_agent._present_other_agent_message"
+        "google.adk.a2a.agent._remote_a2a_agent._present_other_agent_message"
     ) as mock_convert:
       mock_convert.return_value = mock_event
 
       with patch(
-          "google.adk.agents.remote_a2a_agent.convert_genai_part_to_a2a_part"
+          "google.adk.a2a.agent._remote_a2a_agent.convert_genai_part_to_a2a_part"
       ) as mock_convert_part:
         # Return a real A2A text part so production builds a real
         # A2A message that the 1.x send_message adapter can serialize.
@@ -4976,7 +5015,7 @@ class TestRemoteA2aAgentIntegration:
             mock_a2a_client.send_message.return_value = mock_send_message
 
             with patch(
-                "google.adk.agents.remote_a2a_agent.convert_a2a_message_to_event"
+                "google.adk.a2a.agent._remote_a2a_agent.convert_a2a_message_to_event"
             ) as mock_convert_event:
               mock_result_event = Event(
                   author=agent.name,
@@ -4987,10 +5026,10 @@ class TestRemoteA2aAgentIntegration:
 
               # Mock the logging functions to avoid iteration issues
               with patch(
-                  "google.adk.agents.remote_a2a_agent.build_a2a_request_log"
+                  "google.adk.a2a.agent._remote_a2a_agent.build_a2a_request_log"
               ) as mock_req_log:
                 with patch(
-                    "google.adk.agents.remote_a2a_agent.build_a2a_response_log"
+                    "google.adk.a2a.agent._remote_a2a_agent.build_a2a_response_log"
                 ) as mock_resp_log:
                   mock_req_log.return_value = "Mock request log"
                   mock_resp_log.return_value = "Mock response log"
@@ -5053,12 +5092,12 @@ class TestRemoteA2aAgentIntegration:
 
     # Mock dependencies
     with patch(
-        "google.adk.agents.remote_a2a_agent._present_other_agent_message"
+        "google.adk.a2a.agent._remote_a2a_agent._present_other_agent_message"
     ) as mock_convert:
       mock_convert.return_value = mock_event
 
       with patch(
-          "google.adk.agents.remote_a2a_agent.convert_genai_part_to_a2a_part"
+          "google.adk.a2a.agent._remote_a2a_agent.convert_genai_part_to_a2a_part"
       ) as mock_convert_part:
         # Return a real A2A text part so production builds a real
         # A2A message that the 1.x send_message adapter can serialize.
@@ -5087,7 +5126,7 @@ class TestRemoteA2aAgentIntegration:
             mock_a2a_client.send_message.return_value = mock_send_message
 
             with patch(
-                "google.adk.agents.remote_a2a_agent.convert_a2a_message_to_event"
+                "google.adk.a2a.agent._remote_a2a_agent.convert_a2a_message_to_event"
             ) as mock_convert_event:
               mock_result_event = Event(
                   author=agent.name,
@@ -5098,10 +5137,10 @@ class TestRemoteA2aAgentIntegration:
 
               # Mock the logging functions to avoid iteration issues
               with patch(
-                  "google.adk.agents.remote_a2a_agent.build_a2a_request_log"
+                  "google.adk.a2a.agent._remote_a2a_agent.build_a2a_request_log"
               ) as mock_req_log:
                 with patch(
-                    "google.adk.agents.remote_a2a_agent.build_a2a_response_log"
+                    "google.adk.a2a.agent._remote_a2a_agent.build_a2a_response_log"
                 ) as mock_resp_log:
                   mock_req_log.return_value = "Mock request log"
                   mock_resp_log.return_value = "Mock response log"
@@ -5661,7 +5700,7 @@ class TestRemoteA2aAgentTaskModeOutputUnwrapping:
 
           # Mock _find_finish_task_args_from_history to return our test args
           with patch(
-              "google.adk.agents.remote_a2a_agent._find_finish_task_args_from_history"
+              "google.adk.a2a.agent._remote_a2a_agent._find_finish_task_args_from_history"
           ) as mock_find_args:
             mock_find_args.return_value = args
 
