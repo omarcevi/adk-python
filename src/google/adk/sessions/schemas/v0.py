@@ -320,11 +320,12 @@ class StorageEvent(Base):
           ondelete="CASCADE",
       ),
       Index(
-          "idx_events_app_user_session_ts",
+          "idx_events_app_user_session_ts_id",
           "app_name",
           "user_id",
           "session_id",
           desc("timestamp"),
+          desc("id"),
       ),
   )
 

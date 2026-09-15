@@ -32,10 +32,15 @@ from google.adk.platform import time as platform_time
 from google.adk.platform import uuid as platform_uuid
 
 try:
+  from sqlalchemy import Column
   from sqlalchemy import delete
   from sqlalchemy import event
+  from sqlalchemy import Index
+  from sqlalchemy import inspect
   from sqlalchemy import MetaData
   from sqlalchemy import select
+  from sqlalchemy import String
+  from sqlalchemy import Table
   from sqlalchemy.engine import Connection
   from sqlalchemy.engine import make_url
   from sqlalchemy.exc import ArgumentError
@@ -232,6 +237,9 @@ def _set_sqlite_pragma(
   cursor.close()
 
 
+_SUPERSEDED_INDEX_NAMES = frozenset({"idx_events_app_user_session_ts"})
+
+
 def _ensure_schema_indexes_exist(
     connection: Connection, metadata: MetaData
 ) -> None:
@@ -240,6 +248,18 @@ def _ensure_schema_indexes_exist(
   for table in metadata.sorted_tables:
     for index in sorted(table.indexes, key=lambda item: item.name or ""):
       index.create(bind=connection, checkfirst=True)
+
+  # Drop obsolete indexes that have been superseded by composite indexes.
+  inspector = inspect(connection)
+  if inspector.has_table("events"):
+    existing_indexes = {idx["name"] for idx in inspector.get_indexes("events")}
+    for superseded in _SUPERSEDED_INDEX_NAMES:
+      if superseded in existing_indexes:
+        logger.info(
+            "Dropping superseded index %s from events table.", superseded
+        )
+        isolated_table = Table("events", MetaData(), Column("id", String))
+        Index(superseded, isolated_table.c.id).drop(bind=connection)
 
 
 def _setup_database_schema(connection: Connection, metadata: MetaData) -> None:
