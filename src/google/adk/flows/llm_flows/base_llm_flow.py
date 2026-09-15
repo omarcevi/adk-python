@@ -31,7 +31,6 @@ from opentelemetry import context as otel_context
 from opentelemetry import trace
 
 from . import _live_llm_flow
-from . import _output_schema_processor
 from . import functions
 from ...agents._streaming_mode import StreamingMode
 from ...agents.base_agent import BaseAgent
@@ -61,6 +60,7 @@ from ._model_response_finalizer import run_and_handle_error
 from ._resume_utils import decide_step_resume
 from ._resume_utils import ResumeAction
 from .functions import build_auth_request_event
+from .prompt import _schema as _output_schema_processor
 
 # Prefix used by toolset auth credential IDs
 TOOLSET_AUTH_CREDENTIAL_ID_PREFIX = '_adk_toolset_auth_'
