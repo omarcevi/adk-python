@@ -669,6 +669,12 @@ class RemoteA2aAgent(BaseAgent):
           Callable[[InvocationContext, A2AMessage], dict[str, Any]]
       ] = None,
       full_history_when_stateless: bool = False,
+      context_builder: Optional[
+          Callable[
+              [InvocationContext, str, GenAIPartToA2APartConverter],
+              tuple[list[A2APart], Optional[str]],
+          ]
+      ] = None,
       config: Optional[A2aRemoteAgentConfig] = None,
       use_legacy: bool = True,
       auth_scheme: Optional[AuthScheme] = None,
@@ -694,6 +700,10 @@ class RemoteA2aAgent(BaseAgent):
         return Tasks or context IDs) will receive all session events on every
         request. If False (default), the behavior depends on the agent's
         delegation mode: True in "task" mode, False otherwise.
+      context_builder: Optional callable that builds ``(message_parts,
+        context_id)`` for the remote A2A request. When set, it replaces
+        ``_construct_message_parts_from_session``. When ``None``, the default
+        session history construction is used (backward compatible).
       config: Optional configuration object.
       use_legacy: If false, send request to the server including the extension
         indicating that the server should use the new implementation.
@@ -731,6 +741,7 @@ class RemoteA2aAgent(BaseAgent):
     self._a2a_client_factory: Optional[A2AClientFactory] = a2a_client_factory
     self._a2a_request_meta_provider = a2a_request_meta_provider
     self._full_history_when_stateless_param = full_history_when_stateless
+    self._context_builder = context_builder
     self._config = config or A2aRemoteAgentConfig()
 
     if not use_legacy:
@@ -1334,6 +1345,18 @@ class RemoteA2aAgent(BaseAgent):
 
     return message_parts, context_id
 
+  def _build_message_parts_for_request(
+      self, ctx: InvocationContext
+  ) -> tuple[list[A2APart], Optional[str]]:
+    """Build A2A message parts for the outgoing remote request.
+
+    Uses ``context_builder`` when provided; otherwise falls back to
+    ``_construct_message_parts_from_session``.
+    """
+    if self._context_builder is not None:
+      return self._context_builder(ctx, self.name, self._genai_part_converter)
+    return self._construct_message_parts_from_session(ctx)
+
   async def _handle_a2a_response(
       self,
       a2a_response: _compat.A2AClientEvent | A2AMessage,
@@ -1593,9 +1616,7 @@ class RemoteA2aAgent(BaseAgent):
       # Create A2A request for function response or regular message
       a2a_request = self._create_a2a_request_for_user_function_response(ctx)
       if not a2a_request:
-        message_parts, context_id = self._construct_message_parts_from_session(
-            ctx
-        )
+        message_parts, context_id = self._build_message_parts_for_request(ctx)
 
         if not message_parts:
           logger.warning(
