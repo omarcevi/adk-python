@@ -123,7 +123,7 @@ async def test_tool_returning_non_list_of_parts_is_unchanged(
 @pytest.mark.asyncio
 async def test_media_parts_are_left_to_the_framework(
     plugin: MultimodalToolResultsPlugin,
-    mock_tool: MockTool,
+    mock_tool: BaseTool,
     tool_context: ToolContext,
 ):
   """A part holding media travels in the function response, so it is skipped."""
@@ -155,7 +155,7 @@ async def test_media_parts_are_left_to_the_framework(
 @pytest.mark.asyncio
 async def test_file_uri_parts_are_left_to_the_framework(
     plugin: MultimodalToolResultsPlugin,
-    mock_tool: MockTool,
+    mock_tool: BaseTool,
     tool_context: ToolContext,
 ):
   """A part holding a file URI travels in the function response as well."""
@@ -199,7 +199,7 @@ async def test_file_uri_parts_are_left_to_the_framework(
 @pytest.mark.asyncio
 async def test_parts_the_framework_cannot_carry_are_saved(
     plugin: MultimodalToolResultsPlugin,
-    mock_tool: MockTool,
+    mock_tool: BaseTool,
     tool_context: ToolContext,
     part: types.Part,
 ):
@@ -227,7 +227,7 @@ async def test_parts_the_framework_cannot_carry_are_saved(
 @pytest.mark.asyncio
 async def test_non_part_entries_are_saved_unchanged(
     plugin: MultimodalToolResultsPlugin,
-    mock_tool: MockTool,
+    mock_tool: BaseTool,
     tool_context: ToolContext,
 ):
   """An entry that is not a part at all reaches the predicate and survives it."""
@@ -249,7 +249,7 @@ async def test_non_part_entries_are_saved_unchanged(
 @pytest.mark.asyncio
 async def test_only_parts_the_framework_drops_are_saved(
     plugin: MultimodalToolResultsPlugin,
-    mock_tool: MockTool,
+    mock_tool: BaseTool,
     tool_context: ToolContext,
 ):
   """A text part still needs the plugin; the media part alongside it does not."""

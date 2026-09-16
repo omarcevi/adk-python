@@ -21,7 +21,7 @@ from typing import Optional
 from google.genai import types
 
 from ..agents.callback_context import CallbackContext
-from ..flows.llm_flows._tool_caller import _as_function_response_part
+from ..flows.llm_flows.tools._caller import _as_function_response_part
 from ..models.llm_request import LlmRequest
 from ..models.llm_response import LlmResponse
 from ..tools.base_tool import BaseTool
