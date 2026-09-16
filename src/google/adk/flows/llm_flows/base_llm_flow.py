@@ -238,7 +238,7 @@ async def _process_agent_tools(
     return
   agent = cast('LlmAgent', raw_agent)
 
-  from .agent_transfer import _get_transfer_targets
+  from .extensions._agent_transfer import _get_transfer_targets
 
   multiple_tools = len(agent.tools) > 1 or bool(_get_transfer_targets(agent))
   model = agent.canonical_model
@@ -747,7 +747,7 @@ class BaseLlmFlow(ABC):
 
     from google.adk.agents.llm_agent import LlmAgent
 
-    from .agent_transfer import _get_transfer_targets
+    from .extensions._agent_transfer import _get_transfer_targets
 
     # Restrict transfers to declared targets (or itself) to prevent
     # unauthorized escalation. The agent that runs is taken from those

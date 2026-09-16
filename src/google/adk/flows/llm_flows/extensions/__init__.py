@@ -12,12 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Extensions subpackage for LLM flows.
+
+This subpackage contains specialized capabilities extending LLM flows:
+- _agent_transfer: Transferring tasks between agents in an agent hierarchy
+- _code_execution: Pre- and post-processing for external and built-in code executors
+- _planning: Natural language planning and reasoning processor
+"""
+
+from . import _agent_transfer
 from . import _code_execution
-from . import _nl_planning
-from . import contents
-from . import extensions
-from . import functions
-from . import identity
-from . import instructions
-from . import prompt
-from . import request_confirmation
+from . import _planning
+
+__all__ = [
+    '_agent_transfer',
+    '_code_execution',
+    '_planning',
+]

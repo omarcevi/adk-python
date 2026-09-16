@@ -872,7 +872,7 @@ class LlmAgent(BaseAgent, abc.ABC):
     # We may need to wrap some built-in tools if there are other tools
     # because the built-in tools cannot be used together with other tools.
     # TODO: Remove once the workaround is no longer needed.
-    from ..flows.llm_flows.agent_transfer import _get_transfer_targets
+    from ..flows.llm_flows.extensions._agent_transfer import _get_transfer_targets
 
     multiple_tools = len(self.tools) > 1 or bool(_get_transfer_targets(self))
     model = self.canonical_model
@@ -1004,7 +1004,7 @@ class LlmAgent(BaseAgent, abc.ABC):
 
   def __get_agent_to_run(self, agent_name: str) -> BaseAgent:
     """Find the agent this agent transferred to, by name."""
-    from ..flows.llm_flows.agent_transfer import _get_transfer_targets
+    from ..flows.llm_flows.extensions._agent_transfer import _get_transfer_targets
 
     # Prefer this agent's own declared targets, so that resuming a transfer
     # cannot run a same-named agent from an unrelated branch of the tree.
