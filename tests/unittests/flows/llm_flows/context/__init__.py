@@ -11,22 +11,3 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-"""Backward compatibility module for context cache processor.
-
-Context cache processing has moved to
-``google.adk.flows.llm_flows.context._cache``. This module re-exports
-all symbols for backward compatibility.
-"""
-
-from __future__ import annotations
-
-from .context._cache import ContextCacheRequestProcessor as ContextCacheRequestProcessor
-from .context._cache import logger as logger
-from .context._cache import request_processor as request_processor
-
-__all__ = [
-    'ContextCacheRequestProcessor',
-    'logger',
-    'request_processor',
-]

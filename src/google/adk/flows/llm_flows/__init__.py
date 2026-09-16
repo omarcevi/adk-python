@@ -15,6 +15,7 @@
 from . import _code_execution
 from . import _nl_planning
 from . import contents
+from . import context
 from . import extensions
 from . import functions
 from . import identity
