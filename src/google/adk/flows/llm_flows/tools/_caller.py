@@ -51,7 +51,7 @@ from ....tools.tool_context import ToolContext
 from ....utils._callback_pipeline import _run_callbacks
 from ....utils._callback_pipeline import _stop_on_non_none
 from ....utils.context_utils import Aclosing
-from .._invocation_utils import require_agent_name as _require_agent_name
+from ..core._utils import require_agent_name as _require_agent_name
 
 if TYPE_CHECKING:
   from ....agents.invocation_context import InvocationContext
