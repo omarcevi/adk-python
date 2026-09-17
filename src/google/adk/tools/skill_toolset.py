@@ -96,6 +96,30 @@ def _write_activated_skills(
   state[_activated_skills_state_key(agent_name)] = skill_names
 
 
+def _activate_skill(state: Any, agent_name: str, skill_name: str) -> bool:
+  """Appends a skill to an agent's activated skill names.
+
+  Reads the list itself rather than taking one from the caller: callers await a
+  registry fetch before activating, and a concurrent activation may have
+  written in the meantime. Appending to a copy read before the await would drop
+  its entry.
+
+  Args:
+    state: Session state holding the list.
+    agent_name: The agent whose list to append to.
+    skill_name: The skill to activate.
+
+  Returns:
+    True if the skill was appended, False if it was already active.
+  """
+  activated_skills = _read_activated_skills(state, agent_name)
+  if skill_name in activated_skills:
+    return False
+  activated_skills.append(skill_name)
+  _write_activated_skills(state, agent_name, activated_skills)
+  return True
+
+
 class SkillDiscoveryMode(Enum):
   """How the local skill catalog is disclosed to the model."""
 
@@ -426,11 +450,7 @@ class LoadSkillTool(BaseTool):
     )
 
     # Record skill activation in agent state for tool resolution.
-    agent_name = tool_context.agent_name
-    activated_skills = _read_activated_skills(tool_context.state, agent_name)
-    if skill_name not in activated_skills:
-      activated_skills.append(skill_name)
-      _write_activated_skills(tool_context.state, agent_name, activated_skills)
+    _activate_skill(tool_context.state, tool_context.agent_name, skill_name)
 
     instructions = skill.instructions
     if skill.frontmatter.metadata.get("adk_inject_state"):
@@ -1766,14 +1786,7 @@ class SkillToolset(BaseToolset):
     if skill is None:
       raise ValueError(f"Skill '{skill_name}' not found.")
 
-    # The fetch suspends, so re-read: a concurrent activation may have written
-    # the list since. Appending to the stale copy would drop its entry.
-    activated_skills = _read_activated_skills(ctx.state, ctx.agent_name)
-    if skill_name in activated_skills:
-      return False
-    activated_skills.append(skill_name)
-    _write_activated_skills(ctx.state, ctx.agent_name, activated_skills)
-    return True
+    return _activate_skill(ctx.state, ctx.agent_name, skill_name)
 
   def unload_skill(self, ctx: ToolContext, skill_name: str) -> bool:
     """Deactivates a skill for `ctx`'s agent, releasing its dynamic tools.
