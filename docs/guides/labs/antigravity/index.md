@@ -126,3 +126,4 @@ root_agent = AntigravityAgent(
 ## Related samples
 
 * [Game Developer Agent](../../../../contributing/samples/integrations/antigravity_agent/agent.py) - A standalone Antigravity SDK agent that writes browser games as self-contained HTML in a workspace.
+* [AntigravityAgent as an ADK Sub-Agent](../../../../contributing/samples/integrations/antigravity_agent_as_sub_agent/agent.py) - An ADK `LlmAgent` root that delegates coding tasks to a `single_turn` `AntigravityAgent` sub-agent.
