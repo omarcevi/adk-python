@@ -78,6 +78,14 @@ _UNLOAD_SKILL_TOOL_NAME = "unload_skill"
 _LOAD_SKILL_RESOURCE_TOOL_NAME = "load_skill_resource"
 _RUN_SKILL_SCRIPT_TOOL_NAME = "run_skill_script"
 
+# Stands in for the instructions of a skill that is no longer active.
+_UNLOADED_SKILL_STATUS = "unloaded"
+_UNLOADED_SKILL_NOTICE = (
+    "This skill has been unloaded. Its instructions no longer apply and the"
+    " tools it contributed are no longer available. Load it again if you need"
+    " them."
+)
+
 
 def _activated_skills_state_key(agent_name: str) -> str:
   """Returns the session state key holding an agent's activated skill names."""
@@ -167,6 +175,73 @@ class SkillDiscoveryMode(Enum):
   turn costs more than the names do. Registry skills are unaffected: they are
   still reachable only through `search_skills`.
   """
+
+
+def _prune_unloaded_skill_instructions(
+    contents: list[types.Content] | None,
+    load_skill_tool_name: str,
+    active_skills: set[str],
+) -> list[str]:
+  """Strips the instructions of unloaded skills out of a request's history.
+
+  A `load_skill` response carries the whole SKILL.md body and stays in the
+  transcript after the skill is released, so the model keeps reading rules for
+  a skill whose tools are gone. Each one is replaced by a short notice. It is
+  rewritten rather than dropped because the API wants a response for every
+  function call, so removing the part would orphan its call.
+
+  Args:
+    contents: The request's conversation history, rewritten in place by
+      replacing whole `Content` objects.
+    load_skill_tool_name: Name of the load tool as it appears in the history,
+      prefix included.
+    active_skills: Skills still active for this agent. Anything else that was
+      loaded counts as released.
+
+  Returns:
+    The skills stripped, in the order they appear, once per response.
+  """
+  if not contents:
+    return []
+
+  pruned: list[str] = []
+  for index, content in enumerate(contents):
+    new_parts: list[types.Part] | None = None
+    for part_index, part in enumerate(content.parts or []):
+      function_response = part.function_response
+      if (
+          function_response is None
+          or function_response.name != load_skill_tool_name
+      ):
+        continue
+      response = function_response.response
+      if not isinstance(response, dict) or "instructions" not in response:
+        continue
+      skill_name = response.get("skill_name")
+      # Without a name there is no telling which skill this is, so leave it.
+      if not isinstance(skill_name, str) or skill_name in active_skills:
+        continue
+      if new_parts is None:
+        new_parts = list(content.parts or [])
+      new_parts[part_index] = part.model_copy(
+          update={
+              "function_response": function_response.model_copy(
+                  update={
+                      "response": {
+                          "skill_name": skill_name,
+                          "status": _UNLOADED_SKILL_STATUS,
+                          "detail": _UNLOADED_SKILL_NOTICE,
+                      }
+                  }
+              )
+          }
+      )
+      pruned.append(skill_name)
+    if new_parts is not None:
+      # A request's contents are shallow copies of the session's events, so
+      # this response dict is the one history holds. Replace, never edit.
+      contents[index] = content.model_copy(update={"parts": new_parts})
+  return pruned
 
 
 def _build_skill_system_instruction(
@@ -512,9 +587,10 @@ class UnloadSkillTool(BaseTool):
   """Tool to release an active skill.
 
   Drops the skill from the agent's activated-skill state, so the tools it
-  contributed via ``adk_additional_tools`` stop being declared. The
-  instructions it was loaded with stay in the conversation. Nothing is
-  re-fetched, so this also works for a skill that has left the registry.
+  contributed via ``adk_additional_tools`` stop being declared. Later requests
+  replace the instructions it was loaded with by a short notice; the session's
+  own events keep them. Nothing is re-fetched, so this also works for a skill
+  that has left the registry.
 
   Known limitation: the activated-skill list is rewritten wholesale, so
   parallel writes to it race. The deltas merge per key and the last call in the
@@ -1853,10 +1929,10 @@ class SkillToolset(BaseToolset):
   def unload_skill(self, ctx: ToolContext, skill_name: str) -> bool:
     """Deactivates a skill for `ctx`'s agent, releasing its dynamic tools.
 
-    The skill's instructions stay in the conversation history; only its tools
-    and its activation record go away. Synchronous, unlike `load_skill`,
-    because deactivation never consults the registry — so it also works for a
-    skill that has since been removed from one.
+    Later requests replace the instructions it was loaded with by a short
+    notice; the session's own events keep them. Synchronous, unlike
+    `load_skill`, because deactivation never consults the registry — so it also
+    works for a skill that has since been removed from one.
 
     Args:
       ctx: A context for the running agent, e.g. the `ToolContext` a tool or
@@ -2011,6 +2087,25 @@ class SkillToolset(BaseToolset):
       )
 
     llm_request.append_instructions(instructions)
+
+    if self._lifecycle_enabled:
+      self._prune_unloaded_skills(tool_context, llm_request)
+
+  def _prune_unloaded_skills(
+      self, tool_context: ToolContext, llm_request: LlmRequest
+  ) -> None:
+    """Drops released skills' instructions from the outgoing request."""
+    active_skills = set(self.list_active_skills(tool_context))
+    p = f"{self.tool_name_prefix}_" if self.tool_name_prefix else ""
+    pruned = _prune_unloaded_skill_instructions(
+        llm_request.contents,
+        f"{p}{_LOAD_SKILL_TOOL_NAME}",
+        active_skills,
+    )
+    if pruned:
+      logger.debug(
+          "Pruned instructions for unloaded skills: %s", ", ".join(pruned)
+      )
 
   @override
   async def close(self) -> None:

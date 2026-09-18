@@ -3952,6 +3952,8 @@ async def _instruction_from_process_llm_request(toolset):
   """Runs process_llm_request and returns the instruction it appended."""
   ctx, _ = _dict_state_context()
   llm_req = mock.create_autospec(llm_request_model.LlmRequest, instance=True)
+  # `contents` is a pydantic field, so autospec does not give the mock one.
+  llm_req.contents = []
   await toolset.process_llm_request(tool_context=ctx, llm_request=llm_req)
   return llm_req.append_instructions.call_args[0][0][0]
 
@@ -3997,6 +3999,228 @@ async def test_process_llm_request_never_bans_unload_when_disabled(mock_skill1):
 
   assert "NOT available" in instruction
   assert "unload_skill" not in instruction
+
+
+# ── pruning unloaded skills from the request ──
+
+
+def _load_skill_response_part(
+    skill_name: str,
+    *,
+    tool_name: str = "load_skill",
+    instructions: str = "secret instructions",
+) -> types.Part:
+  """A `load_skill` function response as it appears in the history."""
+  return types.Part.from_function_response(
+      name=tool_name,
+      response={
+          "skill_name": skill_name,
+          "instructions": instructions,
+          "frontmatter": {"name": skill_name},
+      },
+  )
+
+
+async def _prune(toolset, contents, active_skills):
+  """Runs process_llm_request over `contents` and returns them pruned."""
+  ctx, _ = _dict_state_context(
+      {"_adk_activated_skill_test_agent": list(active_skills)}
+  )
+  llm_req = llm_request_model.LlmRequest(contents=contents)
+  await toolset.process_llm_request(tool_context=ctx, llm_request=llm_req)
+  return llm_req.contents
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("skill_lifecycle_enabled")
+async def test_prune_replaces_instructions_of_an_unloaded_skill(mock_skill1):
+  """An unloaded skill's SKILL.md body stops being sent to the model."""
+  toolset = skill_toolset.SkillToolset([mock_skill1])
+  contents = [
+      types.Content(role="user", parts=[_load_skill_response_part("skill1")])
+  ]
+
+  contents = await _prune(toolset, contents, active_skills=[])
+
+  response = contents[0].parts[0].function_response.response
+  assert "instructions" not in response
+  assert response["skill_name"] == "skill1"
+  assert response["status"] == "unloaded"
+  assert "no longer apply" in response["detail"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("skill_lifecycle_enabled")
+async def test_prune_keeps_an_active_skill_intact(mock_skill1):
+  """A skill still active keeps the instructions the model is following."""
+  toolset = skill_toolset.SkillToolset([mock_skill1])
+  contents = [
+      types.Content(role="user", parts=[_load_skill_response_part("skill1")])
+  ]
+
+  contents = await _prune(toolset, contents, active_skills=["skill1"])
+
+  response = contents[0].parts[0].function_response.response
+  assert response["instructions"] == "secret instructions"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("skill_lifecycle_enabled")
+async def test_prune_leaves_the_session_owned_part_untouched(mock_skill1):
+  """Contents share their parts with session events, so copy before editing.
+
+  A request's `Content` and `Part` objects are shallow copies of the session's,
+  so the response dict is the very one stored in history. Editing it in place
+  would rewrite what the session recorded.
+  """
+  toolset = skill_toolset.SkillToolset([mock_skill1])
+  original_part = _load_skill_response_part("skill1")
+  original_response = original_part.function_response.response
+  original_content = types.Content(role="user", parts=[original_part])
+
+  contents = await _prune(toolset, [original_content], active_skills=[])
+
+  assert original_response["instructions"] == "secret instructions"
+  assert original_content.parts[0] is original_part
+  assert contents[0] is not original_content
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("skill_lifecycle_enabled")
+async def test_prune_keeps_the_response_answering_its_call(mock_skill1):
+  """The API wants a response per call, so the part is rewritten, not dropped."""
+  toolset = skill_toolset.SkillToolset([mock_skill1])
+  call = types.Part.from_function_call(
+      name="load_skill", args={"skill_name": "skill1"}
+  )
+  contents = [
+      types.Content(role="model", parts=[call]),
+      types.Content(role="user", parts=[_load_skill_response_part("skill1")]),
+  ]
+
+  contents = await _prune(toolset, contents, active_skills=[])
+
+  assert contents[0].parts[0].function_call.name == "load_skill"
+  assert contents[1].parts[0].function_response.name == "load_skill"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("skill_lifecycle_enabled")
+async def test_prune_touches_neither_other_tools_nor_other_parts(mock_skill1):
+  """Only `load_skill` responses are rewritten, and only their own part."""
+  toolset = skill_toolset.SkillToolset([mock_skill1])
+  resource_response = types.Part.from_function_response(
+      name="load_skill_resource",
+      response={"skill_name": "skill1", "content": "reference body"},
+  )
+  contents = [
+      types.Content(
+          role="user",
+          parts=[
+              types.Part.from_text(text="hello"),
+              resource_response,
+              _load_skill_response_part("skill1"),
+          ],
+      )
+  ]
+
+  contents = await _prune(toolset, contents, active_skills=[])
+
+  parts = contents[0].parts
+  assert parts[0].text == "hello"
+  assert parts[1].function_response.response["content"] == "reference body"
+  assert "instructions" not in parts[2].function_response.response
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("skill_lifecycle_enabled")
+async def test_prune_covers_every_load_of_the_same_skill(mock_skill1):
+  """A skill loaded twice leaves two bodies behind; both have to go."""
+  toolset = skill_toolset.SkillToolset([mock_skill1])
+  contents = [
+      types.Content(role="user", parts=[_load_skill_response_part("skill1")]),
+      types.Content(role="user", parts=[_load_skill_response_part("skill1")]),
+  ]
+
+  contents = await _prune(toolset, contents, active_skills=[])
+
+  assert all(
+      "instructions" not in c.parts[0].function_response.response
+      for c in contents
+  )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("skill_lifecycle_enabled")
+async def test_prune_matches_the_prefixed_tool_name(mock_skill1):
+  """A prefixed toolset records prefixed names in the history."""
+  toolset = skill_toolset.SkillToolset([mock_skill1], tool_name_prefix="my")
+  contents = [
+      types.Content(
+          role="user",
+          parts=[
+              _load_skill_response_part("skill1", tool_name="my_load_skill")
+          ],
+      )
+  ]
+
+  contents = await _prune(toolset, contents, active_skills=[])
+
+  assert "instructions" not in contents[0].parts[0].function_response.response
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("skill_lifecycle_enabled")
+async def test_prune_ignores_an_unprefixed_name_when_prefixed(mock_skill1):
+  """An unprefixed response belongs to some other toolset; leave it be."""
+  toolset = skill_toolset.SkillToolset([mock_skill1], tool_name_prefix="my")
+  contents = [
+      types.Content(role="user", parts=[_load_skill_response_part("skill1")])
+  ]
+
+  contents = await _prune(toolset, contents, active_skills=[])
+
+  response = contents[0].parts[0].function_response.response
+  assert response["instructions"] == "secret instructions"
+
+
+@pytest.mark.asyncio
+async def test_prune_does_nothing_while_the_feature_is_off(mock_skill1):
+  """Without the flag there is no unloading, so the history is left alone."""
+  toolset = skill_toolset.SkillToolset([mock_skill1])
+  contents = [
+      types.Content(role="user", parts=[_load_skill_response_part("skill1")])
+  ]
+
+  contents = await _prune(toolset, contents, active_skills=[])
+
+  response = contents[0].parts[0].function_response.response
+  assert response["instructions"] == "secret instructions"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("skill_lifecycle_enabled")
+async def test_prune_handles_a_request_with_no_history(mock_skill1):
+  """The first request of a session has nothing to prune."""
+  toolset = skill_toolset.SkillToolset([mock_skill1])
+
+  assert await _prune(toolset, [], active_skills=[]) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("skill_lifecycle_enabled")
+async def test_prune_leaves_a_response_without_a_skill_name_alone(mock_skill1):
+  """A nameless response names no skill to check, so it is not touched."""
+  toolset = skill_toolset.SkillToolset([mock_skill1])
+  part = types.Part.from_function_response(
+      name="load_skill", response={"instructions": "secret instructions"}
+  )
+  contents = [types.Content(role="user", parts=[part])]
+
+  contents = await _prune(toolset, contents, active_skills=[])
+
+  response = contents[0].parts[0].function_response.response
+  assert response["instructions"] == "secret instructions"
 
 
 # Skill lifecycle tests
