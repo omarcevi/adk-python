@@ -17,7 +17,6 @@ from __future__ import annotations
 from abc import ABC
 import asyncio
 import contextlib
-import inspect
 import logging
 from typing import AsyncGenerator
 from typing import cast
@@ -60,6 +59,8 @@ from .core._utils import copy_http_options
 from .core._utils import require_agent as _require_agent
 from .core._utils import require_run_config as _require_run_config
 from .prompt import _schema as _output_schema_processor
+from .tools._batch_executor import _is_non_blocking_tool
+from .tools._batch_executor import _is_streaming_tool
 from .tools._functions import build_auth_request_event
 
 # Prefix used by toolset auth credential IDs
@@ -307,11 +308,10 @@ def _mark_live_async_tools_non_blocking(llm_request: LlmRequest) -> None:
       tool = llm_request.tools_dict.get(declaration_name)
       if tool is None:
         continue
-      is_streaming_tool = hasattr(tool, 'func') and inspect.isasyncgenfunction(
-          tool.func
-      )
-      if tool.response_scheduling is not None or is_streaming_tool:
+      if _is_streaming_tool(tool) or _is_non_blocking_tool(tool):
         declaration.behavior = types.Behavior.NON_BLOCKING
+      elif tool.behavior is types.Behavior.BLOCKING:
+        declaration.behavior = tool.behavior
 
 
 class BaseLlmFlow(ABC):
