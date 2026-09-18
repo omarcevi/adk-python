@@ -21,6 +21,7 @@ from google.adk.flows.llm_flows import functions
 from google.adk.flows.llm_flows.tools._confirmation import _resolve_confirmation_targets
 from google.adk.flows.llm_flows.tools._confirmation import request_processor
 from google.adk.models.llm_request import LlmRequest
+from google.adk.tools.base_tool import BaseTool
 from google.adk.tools.function_tool import FunctionTool
 from google.adk.tools.tool_confirmation import ToolConfirmation
 from google.genai import types
@@ -1319,3 +1320,94 @@ async def test_resolve_confirmation_targets_requires_adk_name():
 
   assert set(tool_confirmation_dict) == {"requested_fc_id"}
   assert set(original_fcs_dict) == {"requested_fc_id"}
+
+
+class _GatedTool(BaseTool):
+  """A tool outside the FunctionTool hierarchy that asks for a human."""
+
+  def __init__(self):
+    super().__init__(name="gated_tool", description="Needs approval.")
+    self.runs = 0
+
+  async def check_require_confirmation(self, args, tool_context) -> bool:
+    return True
+
+  async def run_async(self, *, args, tool_context):
+    self.runs += 1
+    return {"status": "ran"}
+
+
+async def _call_gated_tool(
+    tool: _GatedTool, tool_confirmation: ToolConfirmation | None = None
+) -> Event:
+  """Calls `tool` through the flow and returns its function response event."""
+  agent = LlmAgent(name="test_agent", tools=[tool])
+  invocation_context = await testing_utils.create_invocation_context(
+      agent=agent
+  )
+  function_call_event = Event(
+      invocation_id=invocation_context.invocation_id,
+      author=agent.name,
+      content=types.Content(
+          parts=[
+              types.Part(
+                  function_call=types.FunctionCall(
+                      id=MOCK_FUNCTION_CALL_ID, name=tool.name, args={}
+                  )
+              )
+          ]
+      ),
+  )
+  event = await functions.handle_function_calls_async(
+      invocation_context,
+      function_call_event,
+      {tool.name: tool},
+      tool_confirmation_dict=(
+          {MOCK_FUNCTION_CALL_ID: tool_confirmation}
+          if tool_confirmation is not None
+          else None
+      ),
+  )
+  assert event is not None
+  return event
+
+
+@pytest.mark.asyncio
+async def test_unconfirmed_tool_is_not_run():
+  """A tool requiring confirmation must not run before a human answers."""
+  tool = _GatedTool()
+
+  event = await _call_gated_tool(tool)
+
+  assert tool.runs == 0
+  assert event.get_function_responses()[0].response == {
+      "error": "This tool call requires confirmation, please approve or reject."
+  }
+  assert set(event.actions.requested_tool_confirmations) == {
+      MOCK_FUNCTION_CALL_ID
+  }
+  assert event.actions.skip_summarization
+
+
+@pytest.mark.asyncio
+async def test_rejected_tool_is_not_run():
+  """A tool the human refused must not run."""
+  tool = _GatedTool()
+
+  event = await _call_gated_tool(tool, ToolConfirmation(confirmed=False))
+
+  assert tool.runs == 0
+  assert event.get_function_responses()[0].response == {
+      "error": "This tool call is rejected."
+  }
+
+
+@pytest.mark.asyncio
+async def test_confirmed_tool_is_run():
+  """A tool the human approved runs and returns its own result."""
+  tool = _GatedTool()
+
+  event = await _call_gated_tool(tool, ToolConfirmation(confirmed=True))
+
+  assert tool.runs == 1
+  assert event.get_function_responses()[0].response == {"status": "ran"}
