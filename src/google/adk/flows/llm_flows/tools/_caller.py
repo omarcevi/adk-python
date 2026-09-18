@@ -726,7 +726,12 @@ async def _apply_confirmation_gate(
   Returns:
     The response to answer the call with, or None if the call may proceed.
   """
-  if not await tool.check_require_confirmation(function_args, tool_context):
+  requires_confirmation = await tool.check_require_confirmation(
+      function_args, tool_context
+  )
+  # Holding a call back from the model is restrictive, and the hook is declared
+  # to answer with a bool, so anything other than True lets the call through.
+  if requires_confirmation is not True:
     return None
 
   confirmation = tool_context.tool_confirmation

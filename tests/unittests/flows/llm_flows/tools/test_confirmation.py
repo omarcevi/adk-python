@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from unittest.mock import create_autospec
 from unittest.mock import patch
 
 from google.adk.agents.llm_agent import LlmAgent
@@ -1410,4 +1411,42 @@ async def test_confirmed_tool_is_run():
   event = await _call_gated_tool(tool, ToolConfirmation(confirmed=True))
 
   assert tool.runs == 1
+  assert event.get_function_responses()[0].response == {"status": "ran"}
+
+
+@pytest.mark.asyncio
+async def test_tool_answering_the_hook_with_a_non_bool_is_run():
+  """A hook that answers with anything but True must not hold the call.
+
+  An autospecced tool answers it with a truthy mock, so gating on truthiness
+  strands every test that drives a mocked tool through the flow.
+  """
+  tool = create_autospec(BaseTool, instance=True)
+  tool.name = "mocked_tool"
+  tool.description = "Answers the hook with a mock."
+  tool.run_async.return_value = {"status": "ran"}
+  agent = LlmAgent(name="test_agent")
+  invocation_context = await testing_utils.create_invocation_context(
+      agent=agent
+  )
+  function_call_event = Event(
+      invocation_id=invocation_context.invocation_id,
+      author=agent.name,
+      content=types.Content(
+          parts=[
+              types.Part(
+                  function_call=types.FunctionCall(
+                      id=MOCK_FUNCTION_CALL_ID, name=tool.name, args={}
+                  )
+              )
+          ]
+      ),
+  )
+
+  event = await functions.handle_function_calls_async(
+      invocation_context, function_call_event, {tool.name: tool}
+  )
+
+  tool.run_async.assert_awaited_once()
+  assert event is not None
   assert event.get_function_responses()[0].response == {"status": "ran"}
