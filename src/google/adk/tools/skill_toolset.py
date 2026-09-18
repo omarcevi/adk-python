@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import dataclasses
 from enum import Enum
 import json
 import logging
@@ -96,28 +97,56 @@ def _write_activated_skills(
   state[_activated_skills_state_key(agent_name)] = skill_names
 
 
-def _activate_skill(state: Any, agent_name: str, skill_name: str) -> bool:
-  """Appends a skill to an agent's activated skill names.
+_DEFAULT_MAX_ACTIVE_SKILLS = 5
 
-  Reads the list itself rather than taking one from the caller: callers await a
-  registry fetch before activating, and a concurrent activation may have
-  written in the meantime. Appending to a copy read before the await would drop
-  its entry.
 
-  Args:
-    state: Session state holding the list.
-    agent_name: The agent whose list to append to.
-    skill_name: The skill to activate.
+class SkillLifecycleMode(Enum):
+  """How long a skill stays active once loaded."""
 
-  Returns:
-    True if the skill was appended, False if it was already active.
+  PERSISTENT = "persistent"
+  """Stays active for the rest of the session unless explicitly unloaded.
+
+  The default, and what every skill did before this setting existed. A
+  persistent skill neither counts against `max_active_skills` nor is evicted
+  by it.
   """
-  activated_skills = _read_activated_skills(state, agent_name)
-  if skill_name in activated_skills:
-    return False
-  activated_skills.append(skill_name)
-  _write_activated_skills(state, agent_name, activated_skills)
-  return True
+
+  BOUNDED = "bounded"
+  """As PERSISTENT, but also subject to the `max_active_skills` cap.
+
+  Loading a bounded skill past the cap releases the bounded skill that was
+  least recently loaded. Reloading one counts as a use.
+  """
+
+
+@dataclasses.dataclass(frozen=True)
+class SkillLifecycleConfig:
+  """How long a toolset's skills stay active once loaded.
+
+  Attributes:
+    enabled: False leaves every skill active for the whole session, whatever the
+      rest of this says.
+    default_mode: Lifecycle for any skill not in `skill_overrides`. PERSISTENT
+      is how skills behaved before this config existed.
+    max_active_skills: How many BOUNDED skills may be active at once, per agent.
+      PERSISTENT skills never count against it.
+    skill_overrides: Per-skill lifecycles. Names need not be registered locally,
+      so a registry skill can be listed here too.
+  """
+
+  enabled: bool = True
+  default_mode: SkillLifecycleMode = SkillLifecycleMode.PERSISTENT
+  max_active_skills: int = _DEFAULT_MAX_ACTIVE_SKILLS
+  skill_overrides: dict[str, SkillLifecycleMode] = dataclasses.field(
+      default_factory=dict
+  )
+
+  def __post_init__(self) -> None:
+    if self.max_active_skills < 1:
+      raise ValueError(
+          "`max_active_skills` must be at least 1, got"
+          f" {self.max_active_skills}."
+      )
 
 
 class SkillDiscoveryMode(Enum):
@@ -450,7 +479,9 @@ class LoadSkillTool(BaseTool):
     )
 
     # Record skill activation in agent state for tool resolution.
-    _activate_skill(tool_context.state, tool_context.agent_name, skill_name)
+    evicted = self._toolset._record_activation(
+        tool_context.state, tool_context.agent_name, skill_name
+    )
 
     instructions = skill.instructions
     if skill.frontmatter.metadata.get("adk_inject_state"):
@@ -459,11 +490,15 @@ class LoadSkillTool(BaseTool):
           tool_context,
       )
 
-    return {
+    result = {
         "skill_name": skill_name,
         "instructions": instructions,
         "frontmatter": skill.frontmatter.model_dump(),
     }
+    if evicted:
+      # Tell the model, rather than letting the declarations quietly vanish.
+      result["unloaded_skills"] = evicted
+    return result
 
   def _detect_error_in_response(self, response: Any) -> Optional[str]:
     """Telemetry hook: returns an error type if the response indicates an error."""
@@ -1495,6 +1530,7 @@ class SkillToolset(BaseToolset):
       tool_name_prefix: str | None = None,
       tool_filter: ToolPredicate | list[str] | None = None,
       discovery_mode: SkillDiscoveryMode = SkillDiscoveryMode.LAZY,
+      lifecycle_config: SkillLifecycleConfig | None = None,
   ):
     """Initializes the SkillToolset.
 
@@ -1516,8 +1552,22 @@ class SkillToolset(BaseToolset):
       discovery_mode: How the local catalog reaches the model. Defaults to
         `LAZY`, where it calls `list_skills`. `EAGER` drops that tool and
         injects the catalog into the system instruction instead.
+      lifecycle_config: How long skills stay active once loaded, and how many
+        may be at once. Defaults to leaving every skill active for the rest of
+        the session, which is how skills behaved before this existed.
+
+    Raises:
+      ValueError: If both `code_executor` and `environment` are given, or on a
+        duplicate skill name or a relative `skills_folder`.
     """
     super().__init__(tool_filter=tool_filter, tool_name_prefix=tool_name_prefix)
+
+    config = lifecycle_config or SkillLifecycleConfig()
+    # Copy the overrides: editing the config later must not change a session
+    # already running.
+    self._lifecycle_config = dataclasses.replace(
+        config, skill_overrides=dict(config.skill_overrides)
+    )
 
     skills = skills or []
 
@@ -1745,7 +1795,10 @@ class SkillToolset(BaseToolset):
     return self._list_skills()
 
   def list_active_skills(self, ctx: ReadonlyContext) -> list[str]:
-    """Returns the skills active for `ctx`'s agent, oldest activation first.
+    """Returns the skills active for `ctx`'s agent, least recently loaded first.
+
+    That is activation order, except that reloading a BOUNDED skill moves it to
+    the end — the order the cap evicts in.
 
     Args:
       ctx: A context for the running agent. `ToolContext` is one.
@@ -1769,6 +1822,11 @@ class SkillToolset(BaseToolset):
         callback was handed.
       skill_name: The skill to activate.
 
+    The bounded cap applies here exactly as it does to the `load_skill` tool:
+    loading a BOUNDED skill can release other bounded ones, and reloading an
+    active one counts as a use. That is not reported back, so a caller who
+    needs to know should read `list_active_skills`.
+
     Returns:
       True if the skill was activated, False if it already was. An already
       active skill is reported without consulting the registry, so this works
@@ -1778,15 +1836,19 @@ class SkillToolset(BaseToolset):
       ValueError: If no such skill is available locally or in the registry.
       Exception: Whatever the registry raises if the lookup itself fails.
     """
-    activated_skills = _read_activated_skills(ctx.state, ctx.agent_name)
-    if skill_name in activated_skills:
+    if skill_name in _read_activated_skills(ctx.state, ctx.agent_name):
+      self._record_activation(ctx.state, ctx.agent_name, skill_name)
       return False
 
     skill = await self._get_or_fetch_skill(skill_name, ctx.invocation_id)
     if skill is None:
       raise ValueError(f"Skill '{skill_name}' not found.")
 
-    return _activate_skill(ctx.state, ctx.agent_name, skill_name)
+    # The fetch suspends, so re-read: a concurrent activation may have written
+    # the list since.
+    was_active = skill_name in _read_activated_skills(ctx.state, ctx.agent_name)
+    self._record_activation(ctx.state, ctx.agent_name, skill_name)
+    return not was_active
 
   def unload_skill(self, ctx: ToolContext, skill_name: str) -> bool:
     """Deactivates a skill for `ctx`'s agent, releasing its dynamic tools.
@@ -1811,6 +1873,67 @@ class SkillToolset(BaseToolset):
     _write_activated_skills(ctx.state, ctx.agent_name, activated_skills)
     return True
 
+  def _lifecycle_for(self, skill_name: str) -> SkillLifecycleMode:
+    """Returns the lifecycle configured for a skill.
+
+    The only reader of the config, so `enabled=False` is enough to switch the
+    whole feature off.
+    """
+    config = self._lifecycle_config
+    if not config.enabled:
+      return SkillLifecycleMode.PERSISTENT
+    return config.skill_overrides.get(skill_name, config.default_mode)
+
+  def _record_activation(
+      self, state: Any, agent_name: str, skill_name: str
+  ) -> list[str]:
+    """Marks a skill active for an agent and enforces the bounded cap.
+
+    Args:
+      state: The session state to record activation in.
+      agent_name: The agent the skill is being activated for.
+      skill_name: The skill being activated.
+
+    Returns:
+      The skills evicted to make room, least recently loaded first. Empty
+      unless the cap was exceeded.
+    """
+    activated_skills = _read_activated_skills(state, agent_name)
+    bounded = self._lifecycle_for(skill_name) is SkillLifecycleMode.BOUNDED
+
+    if skill_name in activated_skills:
+      if not bounded:
+        return []
+      # Reloading is a use: move it to the end so the cap spares it.
+      activated_skills.remove(skill_name)
+
+    activated_skills.append(skill_name)
+    evicted = self._evict_over_cap(activated_skills)
+    _write_activated_skills(state, agent_name, activated_skills)
+    return evicted
+
+  def _evict_over_cap(self, activated_skills: list[str]) -> list[str]:
+    """Drops the oldest bounded skills over the cap, editing the list in place.
+
+    Only bounded skills count against `max_active_skills` and only they are
+    evicted, so a persistent skill can neither be dropped nor push one out.
+    """
+    bounded = [
+        name
+        for name in activated_skills
+        if self._lifecycle_for(name) is SkillLifecycleMode.BOUNDED
+    ]
+    overflow = len(bounded) - self._lifecycle_config.max_active_skills
+    if overflow <= 0:
+      return []
+
+    evicted = bounded[:overflow]
+    dropped = set(evicted)
+    activated_skills[:] = [
+        name for name in activated_skills if name not in dropped
+    ]
+    return evicted
+
   def clone_with_updated_skills(
       self, skills: list[models.Skill]
   ) -> SkillToolset:
@@ -1829,6 +1952,7 @@ class SkillToolset(BaseToolset):
         tool_name_prefix=self.tool_name_prefix,
         tool_filter=self.tool_filter,
         discovery_mode=self._discovery_mode,
+        lifecycle_config=self._lifecycle_config,
     )
 
   def _inject_catalog(self, selected_core_tools: set[str]) -> bool:
