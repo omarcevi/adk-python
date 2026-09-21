@@ -63,8 +63,16 @@ This directory contains specific developer guides for the ADK Python implementat
 * [Live model callbacks](flows/llm_flows/base_llm_flow/live_model_callbacks.md) - Inspecting or blocking content on a live bidirectional session.
 
 ### Integrations
+* [BigQueryToolset](integrations/bigquery/bigquery_toolset/index.md) - Exploring and querying BigQuery, and the write_mode setting that decides what the agent may change.
+* [CrewaiTool](integrations/crewai/crewai_tool/index.md) - Wrapping a CrewAI tool so an ADK agent can call it.
+* [DaytonaEnvironment](integrations/daytona/daytona_environment/index.md) - Running agent code in a Daytona hosted sandbox instead of on your machine.
+* [E2BEnvironment](integrations/e2b/e2b_environment/index.md) - Running agent code in an E2B hosted sandbox, and what happens when the sandbox expires.
+* [FirestoreSessionService](integrations/firestore/firestore_session_service/index.md) - A durable multi-process session store built on Firestore documents and transactions.
+* [GCSToolset and GCSAdminToolset](integrations/gcs/gcs_toolset/index.md) - Giving an agent access to Cloud Storage objects and buckets, read-only until you say otherwise.
+* [LangchainTool](integrations/langchain/langchain_tool/index.md) - Wrapping a LangChain tool so an ADK agent can call it.
 * [Model Armor](integrations/model_armor/index.md) - Screening user input and model output with Google Cloud Model Armor.
 * [MongoDbToolset](integrations/mongodb/mongodb_toolset/index.md) - Vector and hybrid search over a MongoDB database, with the query text embedded on the way through.
+* [RedisSessionService](integrations/redis/redis_session_service/index.md) - Sharing sessions across processes through Redis, including the expiry every other backend lacks.
 
 ### Labs
 * [AntigravityAgent](labs/antigravity/index.md) - Runs a Google Antigravity SDK agent as an ADK agent node.
