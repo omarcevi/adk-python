@@ -27,7 +27,7 @@ from google.genai import types
 from opentelemetry import trace
 
 from . import _live_llm_flow
-from . import functions
+from . import functions as functions
 from ...agents.base_agent import BaseAgent
 from ...agents.invocation_context import InvocationContext
 from ...events.event import Event
@@ -40,6 +40,8 @@ from .core._finalizer import finalize_model_response_event
 from .core._finalizer import handle_after_model_callback
 from .core._finalizer import handle_before_model_callback
 from .core._finalizer import run_and_handle_error
+from .core._function_call_postprocessor import get_agent_to_run
+from .core._function_call_postprocessor import postprocess_handle_function_calls_async
 from .core._model_call import ADK_AGENT_NAME_LABEL_KEY
 from .core._model_call import apply_empty_response_policy
 from .core._model_call import call_llm_async
@@ -50,10 +52,8 @@ from .core._resume import decide_step_resume
 from .core._resume import ResumeAction
 from .core._utils import as_llm_agent as _as_llm_agent
 from .core._utils import copy_http_options
-from .core._utils import require_agent as _require_agent
 from .core._utils import require_run_config as _require_run_config
 from .prompt import _dynamic_instructions
-from .prompt import _schema as _output_schema_processor
 from .tools import _agent_tools
 from .tools import _toolset_auth
 
@@ -613,85 +613,18 @@ class BaseLlmFlow(ABC):
       function_call_event: Event,
       llm_request: LlmRequest,
   ) -> AsyncGenerator[Event, None]:
-    if function_response_event := await functions.handle_function_calls_async(
-        invocation_context, function_call_event, llm_request.tools_dict
-    ):
-      auth_event = functions.generate_auth_event(
-          invocation_context, function_response_event
-      )
-      if auth_event:
-        yield auth_event
-
-        # Interrupt invocation (mirrors _resolve_toolset_auth behavior)
-        invocation_context.end_invocation = True
-
-      tool_confirmation_event = functions.generate_request_confirmation_event(
-          invocation_context, function_call_event, function_response_event
-      )
-      if tool_confirmation_event:
-        yield tool_confirmation_event
-
-      # Always yield the function response event first
-      yield function_response_event
-
-      # Check if this is a set_model_response function response
-      if json_response := _output_schema_processor.get_structured_model_response(
-          function_response_event
-      ):
-        # Create and yield a final model response event
-        final_event = (
-            _output_schema_processor.create_final_model_response_event(
-                invocation_context, json_response
-            )
+    async with Aclosing(
+        postprocess_handle_function_calls_async(
+            invocation_context, function_call_event, llm_request
         )
-        yield final_event
-
-      # NOTE: This recursive nested execution block is preserved as a backward-compatible
-      # fallback for deprecated execution paths (such as legacy `SequentialAgent`) that
-      # do not run under the modern ADK 2.0 `DynamicNodeScheduler`.
-      #
-      # In modern resumable workflow environments, this block is safely bypassed
-      # because the scheduler wrapper (e.g., `_llm_agent_wrapper.py`) intercepts the
-      # `transfer_to_agent` action at the outer execution frame and exits, returning
-      # control to the top-level coordinator.
-      transfer_to_agent = function_response_event.actions.transfer_to_agent
-      if transfer_to_agent:
-        agent_to_run = self._get_agent_to_run(
-            invocation_context, transfer_to_agent
-        )
-        async with Aclosing(agent_to_run.run_async(invocation_context)) as agen:
-          async for event in agen:
-            yield event
+    ) as agen:
+      async for event in agen:
+        yield event
 
   def _get_agent_to_run(
       self, invocation_context: InvocationContext, agent_name: str
   ) -> BaseAgent:
-    agent = _require_agent(invocation_context)
-    root_agent = agent.root_agent
-    agent_to_run = root_agent.find_agent(agent_name)
-    if not agent_to_run:
-      raise ValueError(f'Agent {agent_name} not found in the agent tree.')
-
-    from google.adk.agents.llm_agent import LlmAgent
-
-    from .extensions._agent_transfer import _get_transfer_targets
-
-    # Restrict transfers to declared targets (or itself) to prevent
-    # unauthorized escalation. The agent that runs is taken from those
-    # declarations rather than from the tree-wide search above, so an agent
-    # elsewhere in the tree that happens to share the name cannot stand in for
-    # the declared one.
-    if isinstance(agent, LlmAgent):
-      if agent_name == agent.name:
-        return agent
-      for target in _get_transfer_targets(agent):
-        if target.name == agent_name:
-          return target
-      raise ValueError(
-          f'Agent {agent.name} is not allowed to transfer to agent'
-          f' {agent_name}.'
-      )
-    return agent_to_run
+    return get_agent_to_run(invocation_context, agent_name)
 
   async def _call_llm_async(
       self,
