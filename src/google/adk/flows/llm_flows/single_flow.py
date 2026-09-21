@@ -20,7 +20,6 @@ import logging
 from typing import TYPE_CHECKING
 
 from . import basic
-from . import request_confirmation
 from .base_llm_flow import BaseLlmFlow
 from .context import _cache
 from .context import _compaction
@@ -31,6 +30,7 @@ from .extensions import _planning
 from .prompt import _identity
 from .prompt import _instructions
 from .prompt import _schema as _output_schema_processor
+from .tools import _confirmation as request_confirmation
 
 if TYPE_CHECKING:
   from ._base_llm_processor import BaseLlmRequestProcessor
