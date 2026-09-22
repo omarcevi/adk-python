@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import contextlib
 import json
 import logging
 import os
@@ -526,7 +527,9 @@ async def test_generate_content_async_streaming_tool_call():
   )
 
   chunk_1 = mock.MagicMock()
+  chunk_1.usage = None
   choice_1 = mock.MagicMock()
+  choice_1.finish_reason = None
   delta_1 = mock.MagicMock()
   delta_1.content = None
   tc_1 = mock.MagicMock()
@@ -540,7 +543,9 @@ async def test_generate_content_async_streaming_tool_call():
   chunk_1.choices = [choice_1]
 
   chunk_2 = mock.MagicMock()
+  chunk_2.usage = None
   choice_2 = mock.MagicMock()
+  choice_2.finish_reason = None
   delta_2 = mock.MagicMock()
   delta_2.content = None
   tc_2 = mock.MagicMock()
@@ -554,7 +559,9 @@ async def test_generate_content_async_streaming_tool_call():
   chunk_2.choices = [choice_2]
 
   chunk_3 = mock.MagicMock()
+  chunk_3.usage = None
   choice_3 = mock.MagicMock()
+  choice_3.finish_reason = "tool_calls"
   delta_3 = mock.MagicMock()
   delta_3.content = None
   tc_3 = mock.MagicMock()
@@ -567,21 +574,10 @@ async def test_generate_content_async_streaming_tool_call():
   choice_3.delta = delta_3
   chunk_3.choices = [choice_3]
 
-  chunks = [chunk_1, chunk_2, chunk_3]
+  # Trailing usage-only chunk (from stream_options include_usage); no choices.
+  chunks = [chunk_1, chunk_2, chunk_3, _usage_only_chunk()]
 
-  async def mock_stream():
-    for c in chunks:
-      yield c
-
-  with mock.patch(
-      "google.adk.labs.openai._openai_llm.AsyncOpenAI"
-  ) as mock_client_class:
-    mock_client = mock.MagicMock()
-    mock_client_class.return_value = mock_client
-    mock_client.chat.completions.create = mock.AsyncMock(
-        return_value=mock_stream()
-    )
-
+  with _stream_client(chunks):
     responses = [
         resp
         async for resp in openai_llm.generate_content_async(
@@ -620,6 +616,197 @@ async def test_generate_content_async_streaming_tool_call():
   assert responses[3].content.parts[0].function_call.args == {
       "location": "Paris"
   }
+  # The trailing usage-only chunk and the final finish_reason are surfaced on
+  # the final streamed response.
+  assert responses[3].finish_reason == types.FinishReason.STOP
+  assert responses[3].usage_metadata.prompt_token_count == 12
+  assert responses[3].usage_metadata.candidates_token_count == 8
+  assert responses[3].usage_metadata.total_token_count == 20
+
+
+def _text_stream_chunk(content=None, finish_reason=None):
+  """Builds a streaming chunk carrying a text delta (no tool calls)."""
+  chunk = mock.MagicMock()
+  chunk.usage = None
+  choice = mock.MagicMock()
+  choice.finish_reason = finish_reason
+  delta = mock.MagicMock()
+  delta.content = content
+  delta.tool_calls = None
+  choice.delta = delta
+  chunk.choices = [choice]
+  return chunk
+
+
+def _usage_only_chunk(prompt=12, completion=8, total=20):
+  """Builds the trailing usage-only chunk (no choices)."""
+  chunk = mock.MagicMock()
+  chunk.choices = []
+  chunk.usage.prompt_tokens = prompt
+  chunk.usage.completion_tokens = completion
+  chunk.usage.total_tokens = total
+  chunk.usage.prompt_tokens_details = None
+  return chunk
+
+
+@contextlib.contextmanager
+def _stream_client(chunks):
+  """Patches AsyncOpenAI so create() yields the given chunks for the block."""
+
+  async def mock_stream():
+    for c in chunks:
+      yield c
+
+  with mock.patch(
+      "google.adk.labs.openai._openai_llm.AsyncOpenAI"
+  ) as mock_client_class:
+    mock_client = mock.MagicMock()
+    mock_client_class.return_value = mock_client
+    mock_client.chat.completions.create = mock.AsyncMock(
+        return_value=mock_stream()
+    )
+    yield mock_client
+
+
+@pytest.mark.asyncio
+async def test_generate_content_async_streaming_text_accumulates():
+  """Text deltas stream as partials and merge into a final response."""
+  openai_llm = OpenAILlm(model="gpt-4o", api_key="k")
+  llm_request = LlmRequest(
+      model="gpt-4o",
+      contents=[Content(role="user", parts=[Part.from_text(text="Hi")])],
+  )
+  chunks = [
+      _text_stream_chunk(content="Hello, "),
+      _text_stream_chunk(content="world!", finish_reason="stop"),
+      _usage_only_chunk(),
+  ]
+
+  with _stream_client(chunks):
+    responses = [
+        resp
+        async for resp in openai_llm.generate_content_async(
+            llm_request, stream=True
+        )
+    ]
+
+  assert [r.partial for r in responses] == [True, True, False]
+  assert responses[0].content.parts[0].text == "Hello, "
+  assert responses[1].content.parts[0].text == "world!"
+  assert responses[2].content.parts[0].text == "Hello, world!"
+  assert responses[2].finish_reason == types.FinishReason.STOP
+  assert responses[2].usage_metadata.total_token_count == 20
+
+
+@pytest.mark.asyncio
+async def test_generate_content_async_streaming_without_usage_chunk():
+  """The stream completes normally when the backend omits the usage chunk."""
+  openai_llm = OpenAILlm(model="gpt-4o", api_key="k")
+  llm_request = LlmRequest(
+      model="gpt-4o",
+      contents=[Content(role="user", parts=[Part.from_text(text="Hi")])],
+  )
+  # Backends that ignore stream_options never send the trailing usage chunk.
+  chunks = [
+      _text_stream_chunk(content="Hello, "),
+      _text_stream_chunk(content="world!", finish_reason="stop"),
+  ]
+
+  with _stream_client(chunks):
+    responses = [
+        resp
+        async for resp in openai_llm.generate_content_async(
+            llm_request, stream=True
+        )
+    ]
+
+  assert [r.partial for r in responses] == [True, True, False]
+  assert responses[-1].content.parts[0].text == "Hello, world!"
+  assert responses[-1].finish_reason == types.FinishReason.STOP
+  # No usage chunk arrived, so usage metadata stays absent rather than failing.
+  assert responses[-1].usage_metadata is None
+
+
+@pytest.mark.asyncio
+async def test_generate_content_async_streaming_length_finish_maps_max_tokens():
+  """A non-empty stream ending on length maps to MAX_TOKENS, not an error."""
+  openai_llm = OpenAILlm(model="gpt-4o", api_key="k")
+  llm_request = LlmRequest(
+      model="gpt-4o",
+      contents=[Content(role="user", parts=[Part.from_text(text="Hi")])],
+  )
+  chunks = [
+      _text_stream_chunk(content="Hello, "),
+      _text_stream_chunk(content="world", finish_reason="length"),
+      _usage_only_chunk(),
+  ]
+
+  with _stream_client(chunks):
+    responses = [
+        resp
+        async for resp in openai_llm.generate_content_async(
+            llm_request, stream=True
+        )
+    ]
+
+  final = responses[-1]
+  assert final.partial is False
+  assert final.content.parts[0].text == "Hello, world"
+  assert final.finish_reason == types.FinishReason.MAX_TOKENS
+  # Hitting the token limit with content present is not an error.
+  assert final.error_code is None
+
+
+@pytest.mark.asyncio
+async def test_streaming_request_sends_stream_options_include_usage():
+  """The streaming request asks for the trailing usage-only chunk."""
+  openai_llm = OpenAILlm(model="gpt-4o", api_key="k")
+  llm_request = LlmRequest(
+      model="gpt-4o",
+      contents=[Content(role="user", parts=[Part.from_text(text="Hi")])],
+  )
+
+  chunks = [
+      _text_stream_chunk(content="Hi", finish_reason="stop"),
+      _usage_only_chunk(),
+  ]
+
+  with _stream_client(chunks) as mock_client:
+    _ = [
+        resp
+        async for resp in openai_llm.generate_content_async(
+            llm_request, stream=True
+        )
+    ]
+
+  create_kwargs = mock_client.chat.completions.create.call_args.kwargs
+  assert create_kwargs["stream"] is True
+  assert create_kwargs["stream_options"] == {"include_usage": True}
+
+
+@pytest.mark.asyncio
+async def test_generate_content_async_streaming_empty_abnormal_finish_is_error():
+  """A stream ending with no content and an abnormal finish is an error."""
+  openai_llm = OpenAILlm(model="gpt-4o", api_key="k")
+  llm_request = LlmRequest(
+      model="gpt-4o",
+      contents=[Content(role="user", parts=[Part.from_text(text="Hi")])],
+  )
+  chunks = [_text_stream_chunk(content=None, finish_reason="content_filter")]
+
+  with _stream_client(chunks):
+    responses = [
+        resp
+        async for resp in openai_llm.generate_content_async(
+            llm_request, stream=True
+        )
+    ]
+
+  final = responses[-1]
+  assert final.content is None
+  assert final.finish_reason == types.FinishReason.SAFETY
+  assert final.error_code == types.FinishReason.SAFETY
+  assert final.error_message
 
 
 def _text_completion(content="Hi", finish_reason="stop"):
