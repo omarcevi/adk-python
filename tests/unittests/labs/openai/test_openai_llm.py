@@ -21,6 +21,7 @@ from google.adk.labs.openai._openai_llm import _function_declaration_to_openai_t
 from google.adk.labs.openai._openai_llm import _map_finish_reason
 from google.adk.labs.openai._openai_llm import _part_to_openai_content
 from google.adk.labs.openai._openai_llm import _response_to_llm_response
+from google.adk.labs.openai._openai_llm import _serialize_system_instruction
 from google.adk.labs.openai._openai_llm import OpenAILlm
 from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
@@ -934,6 +935,96 @@ async def test_tool_without_function_declarations_is_skipped_with_warning(
 
   assert len(create_kwargs["tools"]) == 1
   assert "no function declarations" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_system_instruction_content_is_serialized():
+  """A non-string system_instruction is flattened to system message text."""
+  with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test_key"}):
+    openai_llm = OpenAILlm(model="gpt-4o")
+    llm_request = LlmRequest(
+        model="gpt-4o",
+        contents=[Content(role="user", parts=[Part.from_text(text="Hi")])],
+        config=types.GenerateContentConfig(
+            system_instruction=types.Content(
+                parts=[
+                    Part.from_text(text="Be "),
+                    Part.from_text(text="concise."),
+                ]
+            )
+        ),
+    )
+
+    create_kwargs = {}
+
+    async def mock_create(*args, **kwargs):
+      nonlocal create_kwargs
+      create_kwargs = kwargs
+      return _text_completion()
+
+    with mock.patch(
+        "google.adk.labs.openai._openai_llm.AsyncOpenAI"
+    ) as mock_client_class:
+      mock_client = mock.MagicMock()
+      mock_client_class.return_value = mock_client
+      mock_client.chat.completions.create = mock_create
+
+      _ = [
+          resp async for resp in openai_llm.generate_content_async(llm_request)
+      ]
+
+  assert create_kwargs["messages"][0] == {
+      "role": "system",
+      "content": "Be concise.",
+  }
+
+
+def test_serialize_system_instruction_part_shaped_mapping():
+  """A Part-shaped mapping serializes to its text."""
+  assert _serialize_system_instruction({"text": "Be concise."}) == "Be concise."
+
+
+def test_serialize_system_instruction_content_shaped_mapping():
+  """A Content-shaped mapping is serialized instead of raising ValidationError.
+
+  Previously the Mapping branch did types.Part(**mapping), which raised an
+  uncaught pydantic ValidationError on a {'role': ..., 'parts': [...]} dict.
+  """
+  mapping = {
+      "role": "system",
+      "parts": [{"text": "Be "}, {"text": "concise."}],
+  }
+  assert _serialize_system_instruction(mapping) == "Be concise."
+
+
+def test_serialize_system_instruction_unparseable_mapping_returns_none():
+  """A mapping that fits neither Part nor Content is dropped, not raised."""
+  assert _serialize_system_instruction({"not_a_field": 123}) is None
+
+
+def test_serialize_system_instruction_list_joins_items_with_newline():
+  """A list of instructions is flattened and joined with newlines."""
+  instructions = [
+      "Be concise.",
+      types.Part.from_text(text="Cite sources."),
+      {"text": "Avoid jargon."},
+  ]
+  assert (
+      _serialize_system_instruction(instructions)
+      == "Be concise.\nCite sources.\nAvoid jargon."
+  )
+
+
+def test_serialize_system_instruction_unsupported_type_warns(caplog):
+  """An unsupported instruction type is dropped and logged."""
+  with caplog.at_level(logging.WARNING):
+    assert _serialize_system_instruction(types.File(name="f")) is None
+  assert "unsupported type" in caplog.text
+
+
+def test_serialize_system_instruction_non_string_keys_returns_none():
+  """A mapping with non-string keys is dropped, not raised."""
+  assert _serialize_system_instruction({1: "x"}) is None
 
 
 def test_map_finish_reason_recognized_values():

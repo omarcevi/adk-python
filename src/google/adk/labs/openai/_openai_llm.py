@@ -72,6 +72,7 @@ def _to_openai_role(
   return "user"
 
 
+_serialize_system_instruction = _openai_common.serialize_system_instruction
 _tool_choice = _openai_common.tool_choice
 # The finish-reason mapper lives in _openai_common; alias it under the private
 # name this module and its tests use.
@@ -361,12 +362,13 @@ class OpenAILlm(BaseLlm):
   async def generate_content_async(
       self, llm_request: LlmRequest, stream: bool = False
   ) -> AsyncGenerator[LlmResponse, None]:
-    messages = []
+    messages: list[Any] = []
     if llm_request.config and llm_request.config.system_instruction:
-      messages.append({
-          "role": "system",
-          "content": llm_request.config.system_instruction,
-      })
+      system_text = _serialize_system_instruction(
+          llm_request.config.system_instruction
+      )
+      if system_text:
+        messages.append({"role": "system", "content": system_text})
 
     for content in llm_request.contents or []:
       messages.extend(_content_to_openai_messages(content))
@@ -422,7 +424,7 @@ class OpenAILlm(BaseLlm):
     ):
       response_format = {"type": "json_object"}
 
-    kwargs = {
+    kwargs: dict[str, Any] = {
         "model": self.model,
         "messages": messages,
         "tools": tools if tools else None,
