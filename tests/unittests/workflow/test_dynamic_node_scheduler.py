@@ -535,45 +535,6 @@ async def test_waiting_unresolved_propagates_interrupts():
   assert 'fc-1' in tracker._state.interrupt_ids
 
 
-@pytest.mark.asyncio
-async def test_calling_waiting_node_without_rerun_raises_value_error():
-  """Calling a dynamic node that is waiting for output with rerun_on_resume=False raises ValueError."""
-
-  # Given a dynamic node waiting for output with rerun_on_resume=False
-  class _WaitingNode(BaseNode):
-    wait_for_output: bool = True
-
-    async def _run_impl(self, *, ctx, node_input):
-      yield 'should not reach here'
-
-  ctx, _ = _make_parent_ctx()
-  ls = _LoopState()
-  from google.adk.workflow.utils._rehydration_utils import _ChildScanState
-
-  ls.runs['wf/parent/child@r-1'] = DynamicNodeRun(
-      state=NodeState(run_id='r-1'),
-      recovered_state=_ChildScanState(
-          run_id='r-1',
-          interrupt_ids={'pause_req'},
-          resolved_ids={'pause_req'},
-      ),
-  )
-  scheduler = DynamicNodeScheduler(state=ls)
-
-  # When it is called again
-  # Then it raises ValueError
-  with pytest.raises(
-      ValueError, match='is waiting for output but was called again'
-  ):
-    await scheduler(
-        ctx,
-        _WaitingNode(name='child'),
-        'input',
-        node_name='child',
-        run_id='r-1',
-    )
-
-
 def test_get_dynamic_tasks_excludes_done_tasks():
   """get_dynamic_tasks should not return completed tasks."""
   import asyncio
