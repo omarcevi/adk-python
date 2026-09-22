@@ -27,6 +27,9 @@ from google.adk.agents.llm_agent import LlmAgent
 from google.adk.events.event import Event
 from google.adk.events.event import NodeInfo
 from google.adk.events.event_actions import EventActions
+from google.adk.runners import Runner
+from google.adk.sessions.in_memory_session_service import InMemorySessionService
+from google.adk.workflow import START
 from google.adk.workflow._base_node import BaseNode
 from google.adk.workflow._dynamic_node_scheduler import DynamicNodeRun
 from google.adk.workflow._dynamic_node_scheduler import DynamicNodeScheduler
@@ -37,6 +40,8 @@ from google.adk.workflow._node_state import NodeStatus
 from google.adk.workflow._workflow import _LoopState
 from google.adk.workflow._workflow import Workflow
 from google.adk.workflow.utils._rehydration_utils import _ChildScanState
+from google.adk.workflow.utils._workflow_graph_utils import build_node
+from google.genai import types
 from pydantic import BaseModel
 from pydantic import ValidationError
 import pytest
@@ -533,6 +538,111 @@ async def test_waiting_unresolved_propagates_interrupts():
 
   assert child_ctx.interrupt_ids == {'fc-1'}
   assert 'fc-1' in tracker._state.interrupt_ids
+
+
+class _WaitForOutputNoRerunNode(BaseNode):
+  """Node with wait_for_output=True and rerun_on_resume=False."""
+
+  wait_for_output: bool = True
+  rerun_on_resume: bool = False
+
+  async def _run_impl(self, *, ctx, node_input):
+    yield Event(
+        content=types.Content(
+            parts=[
+                types.Part(
+                    function_call=types.FunctionCall(
+                        name='confirm', args={}, id='fc-wait-1'
+                    )
+                )
+            ]
+        ),
+        long_running_tool_ids={'fc-wait-1'},
+    )
+
+
+async def _run_interrupt_then_resume(
+    wf: BaseNode,
+) -> tuple[list[Event], list[Event]]:
+  """Drive `wf` through an interrupting turn and a resuming turn."""
+  session_service = InMemorySessionService()
+  runner = Runner(app_name='t', node=wf, session_service=session_service)
+  session = await session_service.create_session(app_name='t', user_id='u')
+
+  turn_1 = [
+      event
+      async for event in runner.run_async(
+          user_id='u',
+          session_id=session.id,
+          new_message=types.Content(
+              parts=[types.Part(text='start')], role='user'
+          ),
+      )
+  ]
+
+  resume = types.Content(
+      parts=[
+          types.Part(
+              function_response=types.FunctionResponse(
+                  id='fc-wait-1', name='confirm', response={'approved': True}
+              )
+          )
+      ],
+      role='user',
+  )
+  turn_2 = [
+      event
+      async for event in runner.run_async(
+          user_id='u', session_id=session.id, new_message=resume
+      )
+  ]
+  return turn_1, turn_2
+
+
+@pytest.mark.asyncio
+async def test_resolved_interrupt_without_rerun_resumes_static_path():
+  """Resolved interrupts resume without rerun_on_resume on static path."""
+
+  class _Downstream(BaseNode):
+    """Records whatever the upstream node handed it."""
+
+    async def _run_impl(self, *, ctx, node_input):
+      yield Event(output={'received': node_input})
+
+  waiter = _WaitForOutputNoRerunNode(name='waiter')
+  turn_1, turn_2 = await _run_interrupt_then_resume(
+      Workflow(
+          name='wf',
+          edges=[(START, waiter), (waiter, _Downstream(name='down'))],
+      )
+  )
+  assert any(event.long_running_tool_ids for event in turn_1)
+  assert [e.output for e in turn_2 if e.output is not None] == [
+      {'received': {'approved': True}}
+  ]
+
+
+@pytest.mark.asyncio
+async def test_resolved_interrupt_without_rerun_resumes_dynamic_path():
+  """Resolved interrupts resume without rerun_on_resume on dynamic path."""
+
+  dynamic_waiter = _WaitForOutputNoRerunNode(name='waiter')
+
+  async def driver(ctx, node_input):
+    return {'received': await ctx.run_node(dynamic_waiter, node_input='go')}
+
+  turn_1, turn_2 = await _run_interrupt_then_resume(
+      Workflow(
+          name='wf',
+          edges=[
+              (START, build_node(driver, name='driver', rerun_on_resume=True))
+          ],
+      )
+  )
+  assert any(event.long_running_tool_ids for event in turn_1)
+  assert [e.output for e in turn_2 if e.output is not None] == [
+      {'received': {'approved': True}}
+  ]
 
 
 def test_get_dynamic_tasks_excludes_done_tasks():
