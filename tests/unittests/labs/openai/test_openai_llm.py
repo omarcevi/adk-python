@@ -24,6 +24,7 @@ from google.adk.labs.openai._openai_llm import _map_finish_reason
 from google.adk.labs.openai._openai_llm import _part_to_openai_content
 from google.adk.labs.openai._openai_llm import _response_to_llm_response
 from google.adk.labs.openai._openai_llm import _serialize_system_instruction
+from google.adk.labs.openai._openai_llm import _usage_metadata
 from google.adk.labs.openai._openai_llm import OpenAILlm
 from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
@@ -1678,3 +1679,25 @@ async def test_model_function_call_becomes_assistant_tool_calls():
   assert json.loads(tool_calls[0]["function"]["arguments"]) == {
       "location": "NYC"
   }
+
+
+@pytest.mark.parametrize(
+    "details, expected",
+    [
+        (mock.MagicMock(reasoning_tokens=42), 42),
+        (mock.MagicMock(reasoning_tokens=0), 0),
+        (None, None),
+    ],
+)
+def test_usage_metadata_maps_reasoning_tokens(details, expected):
+  """completion_tokens_details.reasoning_tokens maps to thoughts_token_count."""
+  usage = mock.MagicMock(
+      prompt_tokens=100,
+      completion_tokens=50,
+      total_tokens=150,
+      prompt_tokens_details=None,
+      completion_tokens_details=details,
+  )
+  metadata = _usage_metadata(usage)
+  assert metadata.thoughts_token_count == expected
+  assert metadata.candidates_token_count == 50

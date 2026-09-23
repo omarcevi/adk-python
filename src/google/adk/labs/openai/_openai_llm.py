@@ -242,6 +242,13 @@ def _extract_cached_token_count(usage: CompletionUsage) -> int | None:
   return cached if isinstance(cached, int) else None
 
 
+def _extract_reasoning_token_count(usage: CompletionUsage) -> int | None:
+  """Returns OpenAI completion_tokens_details.reasoning_tokens, if present."""
+  details = getattr(usage, "completion_tokens_details", None)
+  reasoning = getattr(details, "reasoning_tokens", None)
+  return reasoning if isinstance(reasoning, int) else None
+
+
 def _usage_metadata(
     usage: CompletionUsage | None,
 ) -> types.GenerateContentResponseUsageMetadata | None:
@@ -253,6 +260,14 @@ def _usage_metadata(
       candidates_token_count=usage.completion_tokens,
       total_token_count=usage.total_tokens,
       cached_content_token_count=_extract_cached_token_count(usage),
+      # Reasoning tokens are also counted in completion_tokens, matching the
+      # Responses surface's candidates/thoughts mapping. Unlike Gemini, where
+      # the two buckets are disjoint, thoughts here is a subset of candidates,
+      # so telemetry/_token_usage.py (which sums candidates + thoughts into
+      # output tokens) over-counts reasoning tokens for OpenAI models. That
+      # aggregator needs to learn about overlapping buckets; until then this
+      # keeps both OpenAI surfaces consistent.
+      thoughts_token_count=_extract_reasoning_token_count(usage),
   )
 
 
