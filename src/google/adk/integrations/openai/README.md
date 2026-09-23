@@ -22,7 +22,12 @@ agent = LlmAgent(
 )
 ```
 
-Requires the `openai` Python package and `OPENAI_API_KEY` environment variable.
+Requires the `openai` Python package and the `OPENAI_API_KEY` environment
+variable. Install the package with ADK's `openai` extra:
+
+```bash
+pip install "google-adk[openai]"
+```
 
 ## OpenAI-Compatible Endpoints
 

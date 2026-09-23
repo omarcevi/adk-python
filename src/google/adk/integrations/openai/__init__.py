@@ -16,7 +16,8 @@
 
 Model providers for the OpenAI Chat Completions and Responses APIs, and for
 hosts that speak them. The model classes need the ``openai`` package; they are
-imported lazily so this package imports without it.
+imported lazily so this package imports without it. Install with:
+pip install "google-adk[openai]"
 """
 
 from __future__ import annotations
