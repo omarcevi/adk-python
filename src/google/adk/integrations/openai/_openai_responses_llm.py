@@ -63,7 +63,7 @@ try:
 except ImportError as e:
   raise ImportError(
       "The 'openai' package is not installed. Please install it with "
-      '`pip install openai` to use the OpenAI Responses API labs models.'
+      '`pip install openai` to use the OpenAI Responses API models.'
   ) from e
 
 from . import _openai_common

@@ -15,7 +15,7 @@
 from unittest import mock
 
 from google.adk import models
-from google.adk.labs.openai._openai_llm import OpenAILlm
+from google.adk.integrations.openai import OpenAILlm
 from google.adk.models import registry
 from google.adk.models.anthropic_llm import Claude
 from google.adk.models.apigee_llm import ApigeeLlm
