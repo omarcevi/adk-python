@@ -18,6 +18,7 @@ import logging
 import os
 from unittest import mock
 
+from google.adk.labs.openai import OpenAIGenerateContentConfig
 from google.adk.labs.openai._openai_llm import _function_declaration_to_openai_tool
 from google.adk.labs.openai._openai_llm import _map_finish_reason
 from google.adk.labs.openai._openai_llm import _part_to_openai_content
@@ -212,6 +213,260 @@ async def test_reasoning_model_uses_max_completion_tokens_and_drops_temp(model):
     assert "max_tokens" not in captured
     assert "temperature" not in captured
     assert "top_p" not in captured
+
+
+async def _capture_chat_kwargs(openai_llm, llm_request) -> dict:
+  """Runs a mocked non-streaming request and returns the create() kwargs."""
+  mock_response = mock.MagicMock()
+  mock_choice = mock.MagicMock()
+  mock_choice.message.content = "hi"
+  mock_choice.message.tool_calls = None
+  mock_choice.finish_reason = "stop"
+  mock_response.choices = [mock_choice]
+  mock_response.usage.prompt_tokens = 1
+  mock_response.usage.completion_tokens = 1
+  mock_response.usage.total_tokens = 2
+
+  captured = {}
+
+  async def mock_create(*args, **kwargs):
+    captured.update(kwargs)
+    return mock_response
+
+  with mock.patch(
+      "google.adk.labs.openai._openai_llm.AsyncOpenAI"
+  ) as mock_client_class:
+    mock_client = mock.MagicMock()
+    mock_client_class.return_value = mock_client
+    mock_client.chat.completions.create = mock_create
+    _ = [
+        resp
+        async for resp in openai_llm.generate_content_async(
+            llm_request, stream=False
+        )
+    ]
+  return captured
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "model,effort",
+    [
+        # Chat Completions: advanced models accept up to xhigh (not max).
+        ("gpt-6-astra", "xhigh"),
+        ("gpt-5.6-sol", "high"),
+        ("gpt-5", "minimal"),
+        ("o3", "medium"),
+    ],
+)
+async def test_reasoning_effort_sent(model, effort):
+  """OpenAIGenerateContentConfig.effort maps to the reasoning_effort kwarg."""
+  with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test_key"}):
+    openai_llm = OpenAILlm(model=model, max_tokens=256)
+    llm_request = LlmRequest(
+        model=model,
+        contents=[Content(role="user", parts=[Part.from_text(text="Hi")])],
+        config=OpenAIGenerateContentConfig(effort=effort),
+    )
+    captured = await _capture_chat_kwargs(openai_llm, llm_request)
+    assert captured["reasoning_effort"] == effort
+
+
+@pytest.mark.asyncio
+async def test_reasoning_effort_absent_without_config():
+  """No reasoning_effort is sent when effort is not configured."""
+  with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test_key"}):
+    openai_llm = OpenAILlm(model="gpt-5.6-sol", max_tokens=256)
+    llm_request = LlmRequest(
+        model="gpt-5.6-sol",
+        contents=[Content(role="user", parts=[Part.from_text(text="Hi")])],
+    )
+    captured = await _capture_chat_kwargs(openai_llm, llm_request)
+    assert "reasoning_effort" not in captured
+
+
+@pytest.mark.asyncio
+async def test_reasoning_effort_unsupported_tier_raises():
+  """An effort tier the model does not accept raises before the request."""
+  with mock.patch.dict(
+      os.environ, {"OPENAI_API_KEY": "test_key", "OPENAI_BASE_URL": ""}
+  ):
+    openai_llm = OpenAILlm(model="o3", max_tokens=256)
+    llm_request = LlmRequest(
+        model="o3",
+        contents=[Content(role="user", parts=[Part.from_text(text="Hi")])],
+        config=OpenAIGenerateContentConfig(effort="minimal"),
+    )
+    with pytest.raises(ValueError, match="not supported by model 'o3'"):
+      _ = [
+          resp
+          async for resp in openai_llm.generate_content_async(
+              llm_request, stream=False
+          )
+      ]
+
+
+@pytest.mark.asyncio
+async def test_reasoning_effort_on_non_reasoning_model_raises():
+  """Setting effort on a non-reasoning model raises before the request."""
+  with mock.patch.dict(
+      os.environ, {"OPENAI_API_KEY": "test_key", "OPENAI_BASE_URL": ""}
+  ):
+    openai_llm = OpenAILlm(model="gpt-4o")
+    llm_request = LlmRequest(
+        model="gpt-4o",
+        contents=[Content(role="user", parts=[Part.from_text(text="Hi")])],
+        config=OpenAIGenerateContentConfig(effort="high"),
+    )
+    with pytest.raises(ValueError, match="does not accept a reasoning effort"):
+      _ = [
+          resp
+          async for resp in openai_llm.generate_content_async(
+              llm_request, stream=False
+          )
+      ]
+
+
+@pytest.mark.asyncio
+async def test_reasoning_effort_max_rejected_on_chat():
+  """``max`` is a Responses-only tier; Chat Completions rejects it."""
+  with mock.patch.dict(
+      os.environ, {"OPENAI_API_KEY": "test_key", "OPENAI_BASE_URL": ""}
+  ):
+    openai_llm = OpenAILlm(model="gpt-6-astra", max_tokens=256)
+    llm_request = LlmRequest(
+        model="gpt-6-astra",
+        contents=[Content(role="user", parts=[Part.from_text(text="Hi")])],
+        config=OpenAIGenerateContentConfig(effort="max"),
+    )
+    with pytest.raises(ValueError, match="on the chat API"):
+      _ = [
+          resp
+          async for resp in openai_llm.generate_content_async(
+              llm_request, stream=False
+          )
+      ]
+
+
+@pytest.mark.asyncio
+async def test_reasoning_effort_passthrough_on_base_url_backend():
+  """With a custom base_url, effort is passed through without model gating.
+
+  An OpenAI-compatible backend (e.g. Grok on Vertex AI) accepts
+  reasoning_effort but its model id is not an OpenAI id, so the tier must not
+  be validated against the OpenAI per-model tables; the backend rejects an
+  unsupported one.
+  """
+  openai_llm = OpenAILlm(
+      model="xai/grok-4.6",
+      api_key="k",
+      base_url="https://host.example/v1",
+      max_tokens=256,
+  )
+  llm_request = LlmRequest(
+      model="xai/grok-4.6",
+      contents=[Content(role="user", parts=[Part.from_text(text="Hi")])],
+      config=OpenAIGenerateContentConfig(effort="high"),
+  )
+
+  captured = {}
+
+  async def mock_create(*args, **kwargs):
+    nonlocal captured
+    captured = kwargs
+    return _text_completion()
+
+  with mock.patch(
+      "google.adk.labs.openai._openai_llm.AsyncOpenAI"
+  ) as mock_client_class:
+    mock_client = mock.MagicMock()
+    mock_client_class.return_value = mock_client
+    mock_client.chat.completions.create = mock_create
+
+    _ = [
+        resp
+        async for resp in openai_llm.generate_content_async(
+            llm_request, stream=False
+        )
+    ]
+
+  assert captured["reasoning_effort"] == "high"
+
+
+@pytest.mark.asyncio
+async def test_reasoning_effort_passthrough_with_injected_client():
+  """An injected client may point at a compatible backend; skip model gating.
+
+  base_url is None, but the host can come from client=AsyncOpenAI(base_url=...),
+  so the tier must be passed through rather than validated against the OpenAI
+  per-model tables (grok-4.6 is not an OpenAI reasoning model).
+  """
+  captured = {}
+
+  async def mock_create(*args, **kwargs):
+    nonlocal captured
+    captured = kwargs
+    return _text_completion()
+
+  client = AsyncOpenAI(api_key="k", base_url="https://host.example/v1")
+  openai_llm = OpenAILlm(model="xai/grok-4.6", client=client, max_tokens=256)
+  llm_request = LlmRequest(
+      model="xai/grok-4.6",
+      contents=[Content(role="user", parts=[Part.from_text(text="Hi")])],
+      config=OpenAIGenerateContentConfig(effort="high"),
+  )
+
+  with mock.patch.object(client.chat.completions, "create", mock_create):
+    _ = [
+        resp
+        async for resp in openai_llm.generate_content_async(
+            llm_request, stream=False
+        )
+    ]
+
+  assert captured["reasoning_effort"] == "high"
+
+
+@pytest.mark.asyncio
+async def test_reasoning_effort_passthrough_with_openai_base_url_env():
+  """OPENAI_BASE_URL points the default client at a compatible backend.
+
+  base_url is None, but the SDK reads OPENAI_BASE_URL, so the tier must be
+  passed through rather than validated against the OpenAI per-model tables.
+  """
+  captured = {}
+
+  async def mock_create(*args, **kwargs):
+    nonlocal captured
+    captured = kwargs
+    return _text_completion()
+
+  with mock.patch.dict(
+      os.environ,
+      {"OPENAI_API_KEY": "k", "OPENAI_BASE_URL": "https://host.example/v1"},
+  ):
+    openai_llm = OpenAILlm(model="xai/grok-4.6", max_tokens=256)
+    llm_request = LlmRequest(
+        model="xai/grok-4.6",
+        contents=[Content(role="user", parts=[Part.from_text(text="Hi")])],
+        config=OpenAIGenerateContentConfig(effort="high"),
+    )
+
+    with mock.patch(
+        "google.adk.labs.openai._openai_llm.AsyncOpenAI"
+    ) as mock_client_class:
+      mock_client = mock.MagicMock()
+      mock_client_class.return_value = mock_client
+      mock_client.chat.completions.create = mock_create
+
+      _ = [
+          resp
+          async for resp in openai_llm.generate_content_async(
+              llm_request, stream=False
+          )
+      ]
+
+  assert captured["reasoning_effort"] == "high"
 
 
 @pytest.mark.asyncio

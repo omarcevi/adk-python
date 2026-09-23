@@ -462,6 +462,24 @@ class OpenAILlm(BaseLlm):
     # the request (with a warning) when it would 400.
     _openai_common.strip_unsupported_sampling_params(kwargs, self.model)
 
+    # Reasoning effort (from OpenAIGenerateContentConfig.effort) maps to the
+    # flat ``reasoning_effort`` Chat Completions parameter. The tier is
+    # validated against the model only when the request targets the real
+    # OpenAI backend (see ``targets_default_openai_host``); otherwise it is
+    # passed through for the compatible backend to accept or reject.
+    validate = _openai_common.targets_default_openai_host(
+        client=self.client,
+        base_url=self.base_url,
+    )
+    effort = _openai_common.build_reasoning_effort(
+        llm_request.config,
+        self.model,
+        "chat",
+        validate=validate,
+    )
+    if effort is not None:
+      kwargs["reasoning_effort"] = effort
+
     if not stream:
       response = await self._openai_client.chat.completions.create(**kwargs)
       yield _response_to_llm_response(response)
